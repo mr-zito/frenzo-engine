@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Frenzo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/static/icon.png">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<aside class="side">
+  <div class="brand">frenzo<span>.</span></div>
+  <div class="brand-sub">clipping studio</div>
+  <nav>
+    <button data-page="live" class="nav on">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4M3.5 3.5a12 12 0 0 0 0 17M20.5 3.5a12 12 0 0 1 0 17"/></svg>
+      Live clipping</button>
+    <button data-page="past" class="nav">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+      Past streams</button>
+    <button data-page="clips" class="nav">
+      <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M10 9.5v5l4.2-2.5z"/></svg>
+      Clips <em id="navClipCount"></em></button>
+    <button data-page="recs" class="nav">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 9h18M3 15h18M8 5v4M16 5v4M8 15v4M16 15v4"/></svg>
+      Recordings <em id="navRecs"></em></button>
+    <button data-page="activity" class="nav">
+      <svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+      Activity <em id="navJobs"></em></button>
+    <button data-page="settings" class="nav">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      Settings</button>
+  </nav>
+  <div class="side-foot">
+    <div id="livePill" class="pill off"><i></i><span>Live clipping off</span></div>
+    <button id="quitBtn" class="ghost small">Quit Frenzo</button>
+  </div>
+</aside>
+
+<main>
+  <!-- ============ LIVE ============ -->
+  <section id="page-live" class="page on">
+    <header class="top">
+      <div>
+        <h1>Live clipping</h1>
+        <p class="sub" id="liveSub">Records your streamers while they play GTA 6 and clips the best moments.</p>
+      </div>
+      <button id="liveBtn" class="primary big">Start live clipping</button>
+    </header>
+    <div id="restartBanner" class="banner hidden">
+      You changed your streamers or settings. <b>Restart live clipping</b> to use them.
+      <button id="restartBtn" class="primary small">Restart now</button>
+    </div>
+    <div class="cols">
+      <div class="col-main">
+        <div class="card">
+          <div class="card-head">
+            <h2>Streamers <span class="count" id="streamerCount"></span></h2>
+          </div>
+          <form id="addForm" class="add-row">
+            <input id="addLink" placeholder="Paste a Twitch, Kick or YouTube channel link (e.g. kick.com/n3on)" autocomplete="off">
+            <label class="check"><input type="checkbox" id="addHot"> Speech listener</label>
+            <button class="primary" type="submit">Add</button>
+          </form>
+          <div id="streamers" class="streamers"></div>
+        </div>
+      </div>
+      <div class="col-side">
+        <div class="card">
+          <div class="card-head"><h2>Live feed</h2></div>
+          <div id="liveFeed" class="feed"><div class="empty">Start live clipping to see what's happening.</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Latest clips</h2><button class="link" data-goto="clips">See all</button></div>
+          <div id="latestClips" class="mini-clips"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PAST ============ -->
+  <section id="page-past" class="page">
+    <header class="top">
+      <div>
+        <h1>Past streams</h1>
+        <p class="sub">Clip broadcasts that already ended. Only the best moments are downloaded in full quality.</p>
+      </div>
+    </header>
+    <div class="cols">
+      <div class="col-main">
+        <div class="card">
+          <div class="card-head"><h2>Find past broadcasts</h2></div>
+          <div class="row">
+            <select id="pastStreamer"></select>
+            <select id="pastHours">
+              <option value="24">Last 24 hours</option>
+              <option value="48">Last 2 days</option>
+              <option value="72" selected>Last 3 days</option>
+              <option value="168">Last week</option>
+            </select>
+            <button id="pastSearch" class="primary">Search</button>
+          </div>
+          <div id="pastList" class="vod-list"><div class="empty">Pick a streamer and search.</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Or paste links</h2></div>
+          <textarea id="pastLinks" rows="4" placeholder="One past-stream or video link per line&#10;https://www.twitch.tv/videos/2345678901&#10;https://kick.com/gattouz0/videos/...&#10;https://www.youtube.com/watch?v=..."></textarea>
+          <div class="row">
+            <span class="lbl">Save clips under</span>
+            <select id="pastName"></select>
+            <input id="pastNameOther" class="hidden" placeholder="name">
+          </div>
+          <div class="yt-cookies">
+            <div class="row">
+              <span class="lbl">YouTube sign-in</span>
+              <span id="ytStatus" class="muted small">checking…</span>
+              <span class="grow"></span>
+              <label class="ghost small ov-pick">Upload cookies file…<input type="file" id="ytFile" accept=".txt,text/plain" hidden></label>
+              <button type="button" id="ytRemove" class="link danger-link hidden">Remove</button>
+            </div>
+            <details class="small muted"><summary>YouTube says "confirm you're not a bot"? How to get the file</summary>
+              <ol>
+                <li>In Opera GX, add the extension <b>Get cookies.txt LOCALLY</b> (it saves the file on your PC, sends nothing).</li>
+                <li>Open a <b>private window</b> and sign in to youtube.com, ideally with a spare Google account.</li>
+                <li>On youtube.com click the extension, <b>Export</b>, then <b>close the private window</b> right away.</li>
+                <li>Upload that file here. Frenzo uses it for every YouTube download. If YouTube blocks again later, upload a new one.</li>
+              </ol>
+              The file is your YouTube login: it stays in the frenzo-engine folder, never share it.</details>
+          </div>
+        </div>
+      </div>
+      <div class="col-side">
+        <div class="card sticky">
+          <div class="card-head"><h2>Clip them</h2></div>
+          <div class="kv"><span>Clips per stream (max)<small id="pastTopNote">No limit: every good moment is clipped</small></span>
+            <div class="stepper"><button data-step="-1">−</button><input id="pastTop" type="number" min="0" value="0" title="0 = no limit"><button data-step="1">+</button></div></div>
+          <label class="check"><input type="checkbox" id="pastAnyGame"> Any game (don't require GTA 6 in the title)</label>
+          <p class="muted small" id="pastSelInfo">0 broadcasts selected</p>
+          <button id="pastGo" class="primary wide">Clip selected</button>
+          <div class="divider"></div>
+          <h3>Jobs</h3>
+          <div id="pastJobs" class="jobs-mini"><div class="empty small">No past-stream jobs yet.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CLIPS ============ -->
+  <section id="page-clips" class="page">
+    <header class="top">
+      <div>
+        <h1>Clips</h1>
+        <p class="sub" id="clipsSub">Review, post, re-edit or delete.</p>
+      </div>
+      <div class="row">
+        <button id="openOutput" class="ghost">Open clips folder</button>
+        <button id="fixAll" class="ghost">Re-edit all old clips</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <input id="clipSearch" placeholder="Search titles…">
+      <select id="clipStreamer"><option value="">All streamers</option></select>
+      <select id="clipFilter">
+        <option value="">All clips</option>
+        <option value="unposted">Not posted yet</option>
+        <option value="posted">Posted</option>
+      </select>
+      <select id="clipSort">
+        <option value="new">Newest first</option>
+        <option value="score">Best score first</option>
+      </select>
+    </div>
+    <div id="clipGrid" class="grid"></div>
+  </section>
+
+  <!-- ============ RECORDINGS ============ -->
+  <section id="page-recs" class="page">
+    <header class="top">
+      <div>
+        <h1>Recordings</h1>
+        <p class="sub">Every live stream, saved hour by hour. Look for moments the engine missed and cut them yourself.</p>
+      </div>
+      <div class="disk" id="disk"><div class="disk-txt"><span id="diskRec"></span><span id="diskFree"></span></div><div class="disk-bar"><i id="diskUsed"></i><b id="diskRecBar"></b></div></div>
+    </header>
+    <div id="diskBanner" class="banner hidden"></div>
+    <div class="cols recs">
+      <div class="col-side left">
+        <div class="card rec-list-card">
+          <div class="card-head"><h2>Streams</h2>
+            <button id="mergeBtn" class="ghost small" disabled title="Tick two parts next to each other">Merge 2 parts</button></div>
+          <div id="recList" class="rec-list"><div class="empty">No recordings yet. They appear here while live clipping records.</div></div>
+        </div>
+      </div>
+      <div class="col-main">
+        <div class="card" id="recViewer">
+          <div id="recEmpty" class="empty">Pick an hour on the left to watch it.</div>
+          <div id="recBody" class="hidden">
+            <div class="card-head"><h2 id="recTitle"></h2><span id="recMeta" class="muted small"></span></div>
+            <div id="recNotReady" class="banner hidden"></div>
+            <div class="rec-video"><video id="recVideo" preload="metadata" playsinline></video></div>
+            <canvas id="recGraph" class="rec-graph" height="120"></canvas>
+            <div id="recTip" class="rec-tip hidden"></div>
+            <div class="graph-legend"><span><i class="lg-chat"></i>chat activity</span><span><i class="lg-loud"></i>loudness</span>
+              <span><i class="lg-clip"></i>clip made</span><span><i class="lg-mom"></i>flagged by the engine</span>
+              <span class="muted">drag on the graph to select · Space play · ← → 5 s · I / O set start / end</span></div>
+            <div class="row tl-controls">
+              <button id="rPlay" class="ghost small">Play</button>
+              <button id="rBack" class="ghost small">−10 s</button>
+              <button id="rFwd" class="ghost small">+10 s</button>
+              <span class="time" id="rTime">0:00</span>
+              <button id="rStart" class="ghost small">Set start here</button>
+              <button id="rEnd" class="ghost small">Set end here</button>
+              <button id="rPlaySel" class="ghost small">Play selection</button>
+              <span class="muted small" id="rSel">No selection yet</span>
+            </div>
+            <div class="edit-grid">
+              <div class="card flat">
+                <h3>Make a clip from your selection</h3>
+                <label class="fld">Title<input id="rcTitle" maxlength="90" placeholder="e.g. Kai's new girlfriend is a plane"></label>
+                <div class="row">
+                  <label class="fld grow">Yellow word<input id="rcHighlight" maxlength="40"></label>
+                  <label class="fld">Emoji<select id="rcEmoji"><option>💀</option><option>😭</option><option>😳</option><option>😱</option><option>🤣</option><option>🥵</option><option>🫣</option><option value="">none</option></select></label>
+                </div>
+                <label class="fld">What happens <small>(optional, helps Claude)</small><textarea id="rcContext" rows="2"></textarea></label>
+                <div class="row">
+                  <button id="rcManual" class="primary">Make clip as is</button>
+                  <button id="rcClaude" class="ghost">Make clip with Claude</button>
+                </div>
+                <p class="muted small">"As is" keeps exactly your selection with your title. "With Claude" lets Claude write the title and cut dead air inside your selection.</p>
+              </div>
+              <div class="card flat">
+                <h3>Moments in this hour</h3>
+                <div id="recMoments" class="moments"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ACTIVITY ============ -->
+  <section id="page-activity" class="page">
+    <header class="top">
+      <div>
+        <h1>Activity</h1>
+        <p class="sub">Everything the engine does, as it happens.</p>
+      </div>
+      <label class="check"><input type="checkbox" id="autoScroll" checked> Follow</label>
+    </header>
+    <div class="cols act">
+      <div class="col-side left">
+        <div class="card">
+          <div class="card-head"><h2>Jobs</h2></div>
+          <div id="jobList" class="jobs"></div>
+        </div>
+      </div>
+      <div class="col-main">
+        <div class="card log-card">
+          <div class="card-head">
+            <h2 id="logTitle">All activity</h2>
+            <button id="logAll" class="link hidden">Show all</button>
+          </div>
+          <div id="logBox" class="log"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="page-settings" class="page">
+    <header class="top">
+      <div>
+        <h1>Settings</h1>
+        <p class="sub">Saved to config.yaml. Live clipping uses them after a restart.</p>
+      </div>
+      <button id="saveSettings" class="primary">Save</button>
+    </header>
+    <div class="settings">
+      <div class="card">
+        <h2>Claude</h2>
+        <div class="kv"><span>Model<small>Haiku uses the least of your plan. Sonnet writes better titles.</small></span>
+          <select data-set="anthropic.claude_code_model"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option></select></div>
+        <div class="kv"><span>Moments judged per hour<small>Protects your Pro plan limits (0 = no limit)</small></span>
+          <input type="number" min="0" max="200" data-set="anthropic.max_checks_per_hour" data-kind="int"></div>
+      </div>
+      <div class="card">
+        <h2>Clips</h2>
+        <div class="kv"><span>Minimum score<small>Claude's 0-10 score needed to keep a clip</small></span>
+          <input type="number" min="0" max="10" data-set="clips.min_score" data-kind="int"></div>
+        <div class="kv"><span>Clips per hour, all streamers<small>0 = no limit</small></span>
+          <input type="number" min="0" max="100" data-set="clips.max_per_hour_total" data-kind="int"></div>
+        <div class="kv"><span>Clips per hour, per streamer</span>
+          <input type="number" min="1" max="100" data-set="clips.max_per_hour_per_streamer" data-kind="int"></div>
+        <div class="kv"><span>Seconds kept before the setup</span>
+          <input type="number" min="0" max="10" step="0.5" data-set="clips.lead_in" data-kind="float"></div>
+        <div class="kv"><span>Seconds kept after the reaction</span>
+          <input type="number" min="0" max="10" step="0.5" data-set="clips.tail" data-kind="float"></div>
+        <div class="kv"><span>Clips with nudity<small>Blur keeps the clip and pixelates the nudity (TikTok, Instagram and YouTube remove unblurred nudity)</small></span>
+          <select data-set="clips.nudity"><option value="blur">Blur it</option><option value="skip">Skip the clip</option><option value="keep">Keep as is</option></select></div>
+      </div>
+      <div class="card">
+        <h2>Editing</h2>
+        <div class="kv"><span>Small captions</span>
+          <label class="switch"><input type="checkbox" data-set="render.captions" data-kind="captions"><i></i></label></div>
+        <div class="kv"><span>Jump cuts</span>
+          <label class="switch"><input type="checkbox" data-set="render.jump_cuts" data-kind="bool"><i></i></label></div>
+      </div>
+      <div class="card">
+        <h2>Detection</h2>
+        <div class="kv"><span>Streamer reactions<small>Yelling, laughing, sudden noises</small></span>
+          <label class="switch"><input type="checkbox" data-set="detection.voice_triggers" data-kind="bool"><i></i></label></div>
+        <div class="kv"><span>Gameplay chaos<small>Bugs, crazy physics, chases</small></span>
+          <label class="switch"><input type="checkbox" data-set="detection.chaos_triggers" data-kind="bool"><i></i></label></div>
+        <div class="kv"><span>Clips folder</span><code id="outDir"></code></div>
+      </div>
+      <div class="card">
+        <h2>Recordings</h2>
+        <div class="kv"><span>Split recordings every (minutes)<small>Each live stream is saved in parts of this length</small></span>
+          <input type="number" min="15" max="240" data-set="storage.segment_minutes" data-kind="int"></div>
+        <div class="kv"><span>Delete recordings after (days)<small>0 = never · 0.0625 = 1.5 hours · 0.25 = 6 hours · 1 = a day</small></span>
+          <input type="number" min="0" max="60" step="any" data-set="storage.auto_delete_recordings_days" data-kind="float"></div>
+      </div>
+      <div class="card learn-card" id="learnCard">
+        <div class="card-head">
+          <h2>Learning <span class="learn-badge" id="learnBadge"></span></h2>
+          <div class="learn-actions">
+            <button class="primary small" id="learnNow">Learn now</button>
+            <button class="ghost small" id="learnUndo">Undo last learning</button>
+            <button class="danger small" id="learnReset">Reset learning</button>
+          </div>
+        </div>
+        <p class="muted small learn-intro">Every clip you cut by hand from a recording is a moment the engine missed; clips you
+          delete, retitle, re-time or send back to Claude with a note are lessons too. After several of them, Claude works out <b>why</b> and tunes the engine
+          (never from one example). Live clipping uses what was learned after a restart.</p>
+        <div class="learn-stats" id="learnStats"></div>
+        <div class="kv"><span>Learn automatically<small id="learnAutoNote">After 5 new examples, at most every 2 hours</small></span>
+          <label class="switch"><input type="checkbox" id="learnAuto"><i></i></label></div>
+        <div class="learn-grid">
+          <div>
+            <h3>Last learning</h3>
+            <div id="learnLast" class="learn-last"></div>
+            <h3>Tuned per streamer</h3>
+            <div id="learnStreamers"></div>
+          </div>
+          <div>
+            <h3>Editor notes <span class="count" id="learnNotesCount"></span></h3>
+            <ul id="learnNotes" class="learn-notes"></ul>
+            <div id="learnExtra" class="learn-extra"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ============ CAMPAIGN RULES (per streamer) ============ -->
+<div id="campPanel" class="cpanel hidden">
+  <div class="cpanel-inner">
+    <button class="close" id="campClose" title="Close">×</button>
+    <h2>Campaign rules <span class="muted" id="campWho"></span></h2>
+    <p class="cnote">Used for editing and writing only. It doesn't change which moments are found.</p>
+    <div class="cgrid">
+      <label class="fld">Campaign name<input id="cpName" maxlength="120" placeholder="e.g. Kai Cenat GTA 6 - $10K"></label>
+      <label class="fld">Campaign page
+        <span class="row"><input id="cpLink" class="grow" maxlength="500" placeholder="https://whop.com/..."><button type="button" id="cpOpen" class="ghost small">Open</button></span></label>
+    </div>
+    <label class="fld">Instructions
+      <textarea id="cpInstr" rows="8" maxlength="4000" placeholder="Paste the campaign's rules here: what to show, what to say in the caption, what's not allowed..."></textarea></label>
+    <div class="cgrid">
+      <label class="fld">Required hashtags <small>(always in the post text)</small><input id="cpTags" placeholder="#kaicenat #gta6"></label>
+      <label class="fld">Required mentions / credit <small>(always in the caption)</small><input id="cpMentions" placeholder="@kaicenat"></label>
+    </div>
+    <div class="fld">Platforms this campaign pays on
+      <div class="chips" id="cpPlats"></div></div>
+    <div class="cgrid">
+      <label class="fld">Min length (seconds) <small>0 = no rule</small><input id="cpMin" type="number" min="0" max="600" step="1"></label>
+      <label class="fld">Max length (seconds) <small>0 = no rule</small><input id="cpMax" type="number" min="0" max="600" step="1"></label>
+    </div>
+    <div class="kv"><span>Your handle on the video<small>Off = the campaign forbids it: the clean version is posted everywhere</small></span>
+      <label class="switch"><input type="checkbox" id="cpWatermark"><i></i></label></div>
+    <div class="kv"><span>Small captions on the video</span>
+      <label class="switch"><input type="checkbox" id="cpCaptions"><i></i></label></div>
+    <div class="kv"><span>Sus sound effect</span>
+      <label class="switch"><input type="checkbox" id="cpSfx"><i></i></label></div>
+
+    <h3 class="csec">Required overlay <small>an image the campaign wants on every clip (logo, sponsor badge…)</small></h3>
+    <div class="ov-row">
+      <div class="ov-mock" id="ovMock"><span class="ov-cam">webcam</span><span class="ov-title">title</span><img id="ovImg" alt="" class="hidden"></div>
+      <div class="grow">
+        <div class="row">
+          <label class="ghost small ov-pick">Choose image…<input type="file" id="cpOvFile" accept="image/png,image/jpeg,image/webp" hidden></label>
+          <button type="button" id="cpOvRemove" class="link danger-link hidden">Remove image</button>
+          <span class="muted small" id="cpOvName">No image</span>
+        </div>
+        <label class="fld" style="margin-top:12px">Position
+          <select id="cpOvPos">
+            <option value="top-left">Top left</option><option value="top">Top</option><option value="top-right">Top right</option>
+            <option value="center">Center</option>
+            <option value="bottom-left">Bottom left</option><option value="bottom">Bottom</option><option value="bottom-right">Bottom right</option>
+          </select></label>
+        <label class="fld">Size <small id="cpOvSizeV"></small><input type="range" id="cpOvSize" min="5" max="100" step="1"></label>
+        <label class="fld">Opacity <small id="cpOvOpV"></small><input type="range" id="cpOvOp" min="10" max="100" step="5"></label>
+        <p class="muted small">Put on every version of this streamer's clips (the clean one too). PNG with a transparent background looks best.</p>
+      </div>
+    </div>
+
+    <h3 class="csec">Extra content this campaign wants <small>searched on top of everything else</small></h3>
+    <p class="cnote">Extra search for this streamer only: everything the engine already looks for stays exactly the same.</p>
+    <label class="fld">What the campaign wants to see
+      <textarea id="cpLook" rows="3" maxlength="1500" placeholder="e.g. moments at the 1WIN casino in Vice City, or when he talks about the sponsor"></textarea></label>
+    <div class="cgrid">
+      <label class="fld">Words chat says about it <small>comma separated</small><input id="cpChatKw" placeholder="1win, casino, jackpot"></label>
+      <label class="fld">Phrases the streamer says <small>comma separated</small><input id="cpSpeechKw" placeholder="1win, casino, code"></label>
+    </div>
+    <div class="row cpanel-foot">
+      <button id="cpApply" class="ghost small" title="Hashtags, credit and campaign name in the post text of all their clips (no re-render)">Apply to this streamer's clips</button>
+      <button id="cpClear" class="link danger-link">Remove rules</button>
+      <span class="grow"></span>
+      <button id="cpCancel" class="ghost small">Cancel</button>
+      <button id="cpSave" class="primary small">Save rules</button>
+    </div>
+    <p class="muted small" style="margin-top:10px">New clips follow the rules right away; live clipping picks up changes after a restart.
+      Old clips: <b>Apply to this streamer's clips</b> updates their post text, and <b>Re-edit with Claude</b> on a clip re-cuts it with the rules.</p>
+  </div>
+</div>
+
+<!-- ============ CLIP DETAIL ============ -->
+<div id="detail" class="detail hidden">
+  <div class="detail-inner">
+    <button class="close" id="detailClose" title="Close">×</button>
+    <div class="d-left">
+      <div class="phone"><video id="dVideo" controls playsinline preload="metadata"></video></div>
+      <div id="dVersions" class="chips center"></div>
+    </div>
+    <div class="d-right">
+      <div id="dBusy" class="banner hidden"></div>
+      <div class="title-row"><h2 id="dTitle" class="d-title" title="Click to edit the title"></h2>
+        <button id="dTitleEdit" class="icon-btn" title="Edit the title">
+          <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg></button></div>
+      <div id="titleEditor" class="card flat editor hidden">
+        <h3>Title on the video</h3>
+        <label class="fld">Title<input id="tTitle" maxlength="90"></label>
+        <div class="row">
+          <label class="fld grow">Yellow word <small>(must be in the title)</small><input id="tHighlight" maxlength="40"></label>
+          <label class="fld">Emoji<select id="tEmoji">
+            <option>💀</option><option>😭</option><option>😳</option><option>😱</option><option>🤣</option><option>🥵</option><option>🫣</option><option value="">none</option></select></label>
+        </div>
+        <div id="tPreview" class="t-preview"></div>
+        <p class="muted small">Saving re-renders the clip with the same cut (about a minute). Jump cuts, captions and callouts stay.</p>
+        <div class="row end">
+          <button id="tOld" class="link hidden" style="margin-right:auto">Use old title</button>
+          <button id="tCancel" class="ghost small">Cancel</button>
+          <button id="tSave" class="primary small">Save title</button>
+        </div>
+      </div>
+      <div id="dMeta" class="d-meta"></div>
+      <div class="tabs">
+        <button class="tab on" data-dtab="info">Details</button>
+        <button class="tab" data-dtab="post">Post</button>
+        <button class="tab" data-dtab="edit">Edit</button>
+      </div>
+      <div id="dtab-info" class="dtab on">
+        <div class="block">
+          <div class="block-head"><h4>Your context</h4><button id="cEdit" class="link">Write it</button></div>
+          <p id="cShow" class="ctx"></p>
+          <div id="cEditor" class="hidden">
+            <textarea id="cText" rows="4" maxlength="800" placeholder="What really happens, in your own words, after watching it.&#10;e.g. Kai thinks the plane is his girlfriend and keeps talking to it while chat spams 💀"></textarea>
+            <div class="row" style="margin-top:10px">
+              <button id="cSave" class="ghost small">Save</button>
+              <button id="cIdeas" class="primary small">Suggest titles from this</button>
+              <button id="cReedit" class="ghost small">Re-edit the clip with this</button>
+              <button id="cCancel" class="link" style="margin-left:auto">Cancel</button>
+            </div>
+            <div id="cIdeasBox" class="ideas"></div>
+          </div>
+        </div>
+        <div class="block hidden" id="dCampBlock"><h4>Campaign</h4><p id="dCamp"></p></div>
+        <div class="block"><h4>Claude's description</h4><p id="dWhat" class="muted"></p></div>
+        <div class="block">
+          <div class="block-head"><h4>Post text</h4><span class="row"><button id="pEdit" class="link">Edit</button><button id="dCopy" class="link">Copy</button></span></div>
+          <pre id="dPost" class="post"></pre>
+          <div id="pEditor" class="hidden">
+            <label class="fld">Post title<input id="pTitle" maxlength="150"></label>
+            <label class="fld">Caption<textarea id="pCaption" rows="3"></textarea></label>
+            <label class="fld">Hashtags<input id="pTags"></label>
+            <div class="row end"><button id="pCancel" class="ghost small">Cancel</button><button id="pSave" class="primary small">Save</button></div>
+          </div>
+        </div>
+        <div class="block"><div class="block-head"><h4>Posted on</h4><button id="goPost" class="link">Post it →</button></div><div id="dPosted" class="chips"></div></div>
+        <div class="block"><h4>Why it was picked</h4><p id="dReason" class="muted"></p></div>
+        <div class="row">
+          <button id="dOpen" class="ghost">Open folder</button>
+          <button id="dDelete" class="danger">Delete clip</button>
+        </div>
+      </div>
+      <div id="dtab-post" class="dtab">
+        <div id="postPlats" class="chips" style="margin-bottom:16px"></div>
+        <div id="postCamp" class="card flat camp-check hidden"></div>
+        <div class="card flat">
+          <div id="postFields"></div>
+          <p class="muted small" id="postTip"></p>
+          <p class="small" id="postFile"></p>
+          <div class="row" style="margin-top:6px">
+            <button id="postOpen" class="primary">Copy caption & open</button>
+            <button id="postCopy2" class="ghost hidden">Copy description</button>
+          </div>
+          <ol class="steps">
+            <li>Your browser opens the upload page (you're already logged in there).</li>
+            <li>The clip's folder opens with the right file selected: <b>drag it onto the page</b>.</li>
+            <li id="postStep3">Press <b>Ctrl+V</b> to paste the caption, then post.</li>
+          </ol>
+        </div>
+        <div class="card flat" style="margin-top:14px">
+          <h3>After posting</h3>
+          <div class="row">
+            <input id="postLink" class="grow" placeholder="Paste the link of your post (keeps it with the clip, handy for campaign submissions)">
+            <button id="postDone" class="primary">Mark as posted</button>
+          </div>
+          <p class="small" id="postDoneInfo"></p>
+        </div>
+      </div>
+      <div id="dtab-edit" class="dtab">
+        <p class="muted small">This is <b>raw.mp4</b>: the moment with about a minute before and after. Pick your own start and end, or tell Claude what to change.</p>
+        <div class="raw-wrap" id="rawWrap">
+          <video id="rawVideo" preload="metadata" playsinline></video>
+          <div id="focusBand" class="focus-band"></div>
+          <div id="camBox" class="cam-box hidden"><span>webcam</span></div>
+          <div id="rawOverlay" class="raw-overlay"></div>
+        </div>
+        <div class="timeline" id="timeline">
+          <div class="tl-orig" id="tlOrig"></div>
+          <div class="tl-sel" id="tlSel"><i class="h l"></i><i class="h r"></i></div>
+          <div class="tl-head" id="tlHead"></div>
+        </div>
+        <div class="row tl-controls">
+          <button id="rawPlay" class="ghost small">Play</button>
+          <span class="time" id="rawTime">0:00.0</span>
+          <button id="setStart" class="ghost small">Set start here</button>
+          <button id="setEnd" class="ghost small">Set end here</button>
+          <button id="playCut" class="ghost small">Play my cut</button>
+          <span class="muted small" id="cutLen"></span>
+        </div>
+        <div class="edit-grid">
+          <div class="card flat">
+            <h3>Render my cut <small>(no Claude)</small></h3>
+            <label class="fld"><span class="row" style="justify-content:space-between">Title
+              <button type="button" id="useOld" class="link hidden">Use old title</button></span><input id="eTitle" maxlength="90"></label>
+            <div class="row">
+              <label class="fld grow">Yellow word<input id="eHighlight" maxlength="30"></label>
+              <label class="fld">Emoji<select id="eEmoji">
+                <option>💀</option><option>😭</option><option>😳</option><option>😱</option><option>🤣</option><option>🥵</option><option>🫣</option><option value="">none</option></select></label>
+            </div>
+            <label class="fld">Gameplay position <small>(or drag the yellow band on the video)</small>
+              <input id="eFocus" type="range" min="0" max="1" step="0.005"></label>
+            <div class="fld">Webcam
+              <div class="seg" id="camMode">
+                <button data-cam="keep" class="on">Keep</button>
+                <button data-cam="draw">Draw box</button>
+                <button data-cam="none">No webcam</button>
+              </div>
+              <label class="check small hidden" id="camRememberWrap"><input type="checkbox" id="camRemember"> Use this box for all future clips of this streamer</label>
+            </div>
+            <p class="muted small" id="cutHint">Your cut keeps everything between start and end (no jump cuts).</p>
+            <button id="renderCut" class="primary wide">Render my cut</button>
+          </div>
+          <div class="card flat">
+            <h3>Ask Claude to re-edit</h3>
+            <textarea id="eNote" rows="5" placeholder="Optional: tell Claude what's wrong.&#10;e.g. The title is wrong, it's an NPC not Lucia. Start when the car jumps."></textarea>
+            <label class="check small"><input type="checkbox" id="eUseRange"> Only use the part between my start and end</label>
+            <button id="askClaude" class="primary wide">Re-edit with Claude</button>
+            <p class="muted small" id="claudeHint"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <h3 id="modalTitle"></h3>
+    <p id="modalText"></p>
+    <div class="row end">
+      <button id="modalNo" class="ghost">Cancel</button>
+      <button id="modalYes" class="danger">Delete</button>
+    </div>
+  </div>
+</div>
+<div id="toasts" class="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

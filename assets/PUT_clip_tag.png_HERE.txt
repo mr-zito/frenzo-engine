@@ -1,0 +1,1 @@
+Not needed anymore: handles are set per platform under 'handles:' in config.yaml.

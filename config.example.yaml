@@ -1,0 +1,136 @@
+# Frenzo engine settings. Copy this file to config.yaml and fill in the PASTE_ values.
+
+# Which game to clip. Streams are only recorded while the streamer plays it.
+game:
+  name: "Grand Theft Auto VI"          # exact Twitch category name
+  # Kick categories and YouTube stream titles are matched against these words:
+  keywords: ["grand theft auto vi", "grand theft auto 6", "gta vi", "gta 6", "gta6", "gtavi"]
+  only_when_playing: true
+
+poll_seconds: 60                      # how often to check who is live
+
+# Only needed if you have Twitch streamers (README step 3a)
+twitch:
+  client_id: "PASTE_TWITCH_CLIENT_ID"
+  client_secret: "PASTE_TWITCH_CLIENT_SECRET"
+
+# Only needed if you have Kick streamers (README step 3b)
+kick:
+  client_id: "PASTE_KICK_CLIENT_ID"
+  client_secret: "PASTE_KICK_CLIENT_SECRET"
+
+# YouTube needs no keys.
+
+anthropic:
+  api_key: "PASTE_ANTHROPIC_API_KEY"   # optional (paid API credits). Leave as is to use your Claude plan.
+  model: "claude-sonnet-5-5"
+  # backend: auto = use the API key if you added one, otherwise Claude Code signed in with your
+  # Claude plan (Pro works, no API credits needed). api / claude_code / none to force one.
+  backend: "auto"
+  claude_code_model: "haiku"     # haiku uses the least of your plan's usage; sonnet = smarter
+  max_checks_per_hour: 30        # with Claude Code: at most this many moments judged per hour (0 = no limit)
+  send_frames: true              # let Claude look at 6 frames of each moment (better picks, uses a bit more of your plan)
+
+# ONLY streamers whose clipping campaign you joined. One block per streamer.
+streamers:
+  - platform: twitch                   # twitch.tv/<login>
+    login: "PASTE_TWITCH_LOGIN"
+    tags: ["#gta6", "#gtavi"]
+    # facecam: {x: 0.75, y: 0.0, w: 0.25, h: 0.28}
+
+  - platform: kick                     # kick.com/<login>
+    login: "PASTE_KICK_LOGIN"
+    tags: ["#gta6", "#kick"]
+    # chatroom_id: 12345678            # README step 5: needed to read Kick chat
+    # facecam: {x: 0.0, y: 0.0, w: 0.25, h: 0.3}
+
+  - platform: youtube                  # youtube.com/@<handle>
+    login: "@PASTE_YOUTUBE_HANDLE"
+    tags: ["#gta6", "#shorts"]
+    # any_game: true                   # record every live stream, even if the title doesn't say GTA
+
+# Optional per streamer:
+#   facecam: where the webcam is, as fractions of the screen (0 to 1). With it, clips are
+#            "webcam on top, gameplay below". Without it, the blurred layout is used.
+#   any_game: true  -> ignore the game filter for this streamer
+#   hot_takes: true -> keep listening to what they say and flag strong opinions about the game
+#                      (uses some PC power: turn it on for your 3-4 biggest campaigns)
+
+detection:
+  chat_window_seconds: 10        # chat speed is measured over this many seconds
+  spike_multiplier: 3.0          # flag when chat is this many times faster than normal
+  min_messages_in_window: 15     # ignore tiny chats
+  cooldown_seconds: 60           # minimum gap between two flagged moments
+  use_twitch_clips: true         # also use clips viewers make on Twitch
+  clip_poll_seconds: 90
+  voice_triggers: true           # flag when the streamer yells, laughs or makes a sudden weird noise
+  chaos_triggers: true           # flag bugs / crazy physics: the gameplay suddenly goes wild
+  chaos_ratio: 2.6               # how much wilder than normal (higher = fewer, bigger moments)
+  hot_take_model: "base"         # speech model for hot-take listening (streamers with hot_takes: true)
+  voice_sensitivity: "normal"    # low / normal / high
+  loudness_triggers: "off"       # off / when_no_chat / always : flag any sudden loud sound (game included)
+  loudness_jump_db: 12
+
+clips:
+  min_score: 6                   # Claude's 0-10 score needed to save a clip
+  min_length: 12                 # seconds
+  max_length: 45                 # viral clips are 12-35 s (most ~17 s); running gags up to 45 s
+  running_gags: true             # several moments within 3 min -> one long window, best beats stitched
+  gag_window: 180
+  max_per_hour_per_streamer: 8
+  skip_spoilers: true            # skip big GTA 6 story spoilers
+  skip_nudity: true              # skip clips showing exposed nudity (TikTok/Instagram/YouTube remove them
+                                 # and can restrict the account). Spicy-but-covered moments are still kept.
+  context_before: 70             # seconds of stream analysed before the moment
+  context_after: 20              # and after it
+  lead_in: 1.5                   # extra seconds kept before the setup, so viewers see what's going on
+  tail: 2.0                      # extra seconds kept after the reaction, so the laugh lands
+  min_setup: 4.0                 # a clip always shows at least this much before the flagged moment
+
+transcription:
+  model: "small"                 # tiny / base / small / medium / large-v3 (bigger = better, slower)
+  device: "auto"                 # auto / cpu / cuda (NVIDIA GPU)
+  language: null                 # null = auto-detect, or "en", "fr", ...
+
+render:
+  layout: "reel"                 # reel = webcam on top + heading + gameplay zoomed on the action (like the
+                                 # reel you liked). Webcam is found automatically. Others: focus / stacked / blur
+  captions: "mini"               # small 1-3 word captions of what the streamer says (like viral clip pages);
+                                 # false = no captions
+  jump_cuts: true                # cut out dead air inside the clip (Claude picks the pieces)
+  title_bar: true                # title between webcam and gameplay with a yellow keyword + emoji
+  title_size: 58
+  caption_size: 56
+  callout_size: 64               # big coloured meme texts like "*Laughing*", "+$1k"
+  caption_font: "Montserrat ExtraBold"   # bundled in assets/fonts
+  sound_effects: true            # the "sus" sound on sus moments only
+  sfx_types: ["sus"]             # which sound effects are allowed (also available: boom, dramatic, fail, whoosh, ding)
+  sfx_volume: 0.8
+  game_zoom: 1.0                 # zoom into the gameplay (1.0 = none, so cars/characters at the bottom aren't cut)
+  heading_size: 72
+  raw_padding: 60                # raw.mp4 gets this many seconds before AND after the clip
+  font: "Arial Black"
+  caption_color: "#FFFFFF"
+  highlight_color: "#FFD60A"
+  # One clip version per handle (platforms with the same handle share a file),
+  # plus clip_clean.mp4 with no handle. Remove a line to stop making that version.
+  handles:
+    tiktok: "@its_frenzo"
+    instagram: "@its_frenzo"
+    youtube: "@itsfrenzo"
+    x: "@its_frenzohq"
+  handle: "@itsfrenzo"           # only used if 'handles' is empty
+  tag_image: "assets/clip_tag.png"
+  crf: 18                        # quality: lower = sharper and bigger files (18 = very high)
+  preset: "slow"                 # slower = better quality at the same size (veryfast if the PC can't keep up)
+  save_raw: true
+
+storage:
+  output_dir: "clips"
+  recordings_dir: "recordings"
+  keep_recordings: true            # recordings are kept: see and delete them in the app (Recordings tab)
+  segment_minutes: 60             # live recordings are split into parts of this many minutes
+  auto_delete_recordings_days: 0  # 0 = never delete recordings automatically
+  quality: "1080p60,1080p,936p60,720p60,best"
+
+workers: 1                       # moments processed at the same time (raise only with a strong PC/GPU)

@@ -1,0 +1,4 @@
+# Only for the Frenzo desktop app (Frenzo.exe + icon next to the clock)
+pywebview>=5.0
+pystray>=0.19
+pyinstaller>=6.0

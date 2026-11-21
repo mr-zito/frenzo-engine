@@ -1,0 +1,15 @@
+# never commit: your YouTube login, recordings, logs, the virtual env, built app
+youtube_cookies.txt
+recordings/
+logs/
+.venv/
+FrenzoApp/
+test_runs/
+__pycache__/
+*.pyc
+*.bak
+config.backup.yaml
+config.before-*.yaml
+*.patch
+app_window.log
+assets/sfx/_builtin/

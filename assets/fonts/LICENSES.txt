@@ -1,0 +1,3 @@
+Montserrat: SIL Open Font License 1.1 (see OFL-Montserrat.txt).
+Noto Color Emoji: SIL Open Font License 1.1, by Google.
+Both may be bundled and redistributed with this engine.
