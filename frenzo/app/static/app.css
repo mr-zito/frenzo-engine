@@ -377,6 +377,7 @@ input[type=number] { width: 90px; }
 .rec-tip { position: fixed; z-index: 60; background: #000; border: 1px solid var(--line2); border-radius: 8px; padding: 6px 9px; font-size: 12px; pointer-events: none; max-width: 340px; }
 .graph-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
 .graph-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.lg-viewer { background: #4FC3FF; } .lg-heat { background: #FF6AD5; }
 .lg-chat { background: rgba(255,214,10,.55); } .lg-loud { background: #9a9a9a; } .lg-clip { background: var(--y); } .lg-mom { background: #fff; border-radius: 50% !important; }
 .moments { display: flex; flex-direction: column; gap: 6px; max-height: 330px; overflow-y: auto; }
 .mom { display: grid; grid-template-columns: 54px 1fr auto; gap: 10px; align-items: center; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; color: var(--text); font-size: 12.5px; }

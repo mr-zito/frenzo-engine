@@ -392,18 +392,17 @@ def clip_past_stream(cfg, scfg, vod, pipeline, top, report=None):
                 os.remove(seg)
             except OSError:
                 pass
-        _keep_preview(cfg, scfg, vod, preview, moments, crowd_res.get("summary") or {})
+        try:                                   # keep the preview: you can cut this stream by hand for a while
+            from . import streams
+            streams.keep(cfg, scfg, vod, preview, moments, crowd_res.get("found") or [], chat)
+        except Exception as e:
+            log(f"couldn't keep the preview for cutting by hand ({str(e)[:100]})", tag)
     finally:
         stop_beat.set()
         shutil.rmtree(work, ignore_errors=True)
     log(f"past stream done: {saved} clip(s) saved" + (f" + {saved_extra} with the campaign's content"
                                                        if saved_extra else ""), tag)
     return saved + saved_extra
-
-
-def _keep_preview(cfg, scfg, vod, preview, moments, crowd_summary):
-    """Phase 6 keeps the preview for cutting by hand; until then, nothing."""
-    return None
 
 
 def run_vods(cfg, hours=36, top=0, urls=None, streamer=None, any_game=False, no_ai=False, report_dir=None):

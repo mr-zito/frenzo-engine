@@ -881,6 +881,56 @@ def create_app(cfg_path):
         job = jobs.add("cut", "New clip: " + label[:48], args, target=f"rec:{p['stem']}")
         return jsonify({"ok": True, "job": job.id})
 
+    # ---- past streams kept for cutting by hand (frenzo/streams.py) ----
+    @app.get("/api/streams")
+    def api_streams():
+        from .. import streams as ST
+        return jsonify({"streams": ST.list_streams(state["cfg"])})
+
+    @app.get("/api/streams/<sid>")
+    def api_stream(sid):
+        from .. import streams as ST
+        m = ST.load(state["cfg"], sid)
+        if not m:
+            return err("Stream not found (kept past streams expire after a while)", 404)
+        return jsonify(dict(m, ready=True, clips=[]))
+
+    @app.get("/media-stream/<sid>")
+    def media_stream(sid):
+        from .. import streams as ST
+        p = ST.media_path(state["cfg"], sid)
+        if not p or not os.path.exists(p):
+            abort(404)
+        return send_file(p, conditional=True, max_age=0)
+
+    @app.post("/api/streams/<sid>/cut")
+    def cut_stream(sid):
+        from .. import streams as ST
+        body = request.get_json(force=True)
+        m = ST.load(state["cfg"], sid)
+        if not m:
+            return err("Stream not found", 404)
+        try:
+            start, end = float(body["start"]), float(body["end"])
+        except (KeyError, ValueError, TypeError):
+            return err("Pick a start and an end")
+        if end - start < 3:
+            return err("The selection must be at least 3 seconds long")
+        if end - start > 600:
+            return err("The selection is longer than 10 minutes: pick a shorter moment")
+        args = ["cut", sid, f"{start:.2f}-{end:.2f}"]
+        if (body.get("context") or "").strip():
+            args += ["--note", str(body["context"]).strip()[:800]]
+        if body.get("mode") == "manual":
+            if not (body.get("title") or "").strip():
+                return err("Write a title (or use Make clip with Claude)")
+            args += ["--as-is", "--title", str(body["title"]).strip()[:120]]
+        elif body.get("no_judge"):
+            args += ["--no-judge"]
+        label = (body.get("title") or "").strip() or f"{m.get('author') or m.get('login')} {start / 60:.0f}:{start % 60:02.0f}"
+        job = jobs.add("cut", "Cut from stream: " + label[:44], args, target=f"stream:{sid}")
+        return jsonify({"ok": True, "job": job.id})
+
     @app.get("/api/state")
     def api_state():
         from ..ai import _find_claude_code

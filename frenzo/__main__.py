@@ -113,6 +113,14 @@ def main():
     k.add_argument("--emoji")
     k.add_argument("--context")
     k.add_argument("--no-learn", action="store_true", help="don't turn this clip into a learning example")
+    ct = sub.add_parser("cut", help="cut clips yourself from a past stream Frenzo downloaded (or a stream file)")
+    ct.add_argument("stream", help="the kept stream's id (see the app, or Frenzo Clips/.streams) or a video file")
+    ct.add_argument("ranges", nargs="+", help="start-end, e.g. 1:23:45-1:24:30 or 5025-5070 (several allowed)")
+    ct.add_argument("--note", help="what happens / what you want, in your own words")
+    ct.add_argument("--no-judge", action="store_true", help="no score: Claude only makes the edit plan")
+    ct.add_argument("--as-is", action="store_true", help="no Claude at all: your range as it is (needs --title)")
+    ct.add_argument("--title")
+    ct.add_argument("--streamer", help="whose settings to use (default: the stream's streamer)")
     ln = sub.add_parser("learn", help="learn from your hand-made, deleted, retitled and re-timed clips")
     ln.add_argument("--measure", help="(internal) measure a clip you cut by hand and save it as an example")
     ln.add_argument("--dry-run", action="store_true", help="ask Claude and show the result, save nothing")
@@ -176,6 +184,20 @@ def main():
                 log("learning: measuring this moment in the background (it becomes a lesson for the engine)", "learn")
             except Exception as e:
                 log(f"learning: couldn't start measuring ({str(e)[:100]})", "learn")
+        return
+    if args.cmd == "cut":
+        from .streams import cut, parse_ranges
+        cfg = load_config(args.config)
+        try:
+            ranges = parse_ranges(args.ranges)
+        except ValueError as e:
+            raise SystemExit(f"ERROR: {e}")
+        if args.as_is and not args.title:
+            raise SystemExit("ERROR: --as-is needs --title")
+        folders = cut(cfg, args.stream, ranges, note=args.note, no_judge=args.no_judge,
+                      mode="manual" if args.as_is else "claude", title=args.title, streamer=args.streamer)
+        from .util import log
+        log(f"{len(folders)} of {len(ranges)} cut(s) made", "cut")
         return
     if args.cmd == "learn":
         from .learning import main as learn_main

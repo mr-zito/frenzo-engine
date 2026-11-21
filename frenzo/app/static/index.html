@@ -190,6 +190,10 @@
             <button id="mergeBtn" class="ghost small" disabled title="Tick two parts next to each other">Merge 2 parts</button></div>
           <div id="recList" class="rec-list"><div class="empty">No recordings yet. They appear here while live clipping records.</div></div>
         </div>
+        <div class="card rec-list-card">
+          <div class="card-head"><h2>Past streams</h2><span class="muted small">cut them yourself</span></div>
+          <div id="streamList" class="rec-list"><div class="empty small">Past streams Frenzo processed are kept here for 2 days, so you can cut moments yourself.</div></div>
+        </div>
       </div>
       <div class="col-main">
         <div class="card" id="recViewer">
@@ -202,6 +206,7 @@
             <div id="recTip" class="rec-tip hidden"></div>
             <div class="graph-legend"><span><i class="lg-chat"></i>chat activity</span><span><i class="lg-loud"></i>loudness</span>
               <span><i class="lg-clip"></i>clip made</span><span><i class="lg-mom"></i>flagged by the engine</span>
+              <span class="stream-only hidden"><i class="lg-viewer"></i>viewer clips</span><span class="stream-only hidden"><i class="lg-heat"></i>most replayed</span>
               <span class="muted">drag on the graph to select · Space play · ← → 5 s · I / O set start / end</span></div>
             <div class="row tl-controls">
               <button id="rPlay" class="ghost small">Play</button>

@@ -1221,7 +1221,8 @@ async function loadRecs() {
     R.sessions = r.sessions;
     renderDisk(r.disk);
     renderRecList();
-    if (R.cur) {
+    loadStreams();
+    if (R.cur && !String(R.cur).startsWith("stream:")) {
       const p = findPart(R.cur);
       if (!p) closeRec();
       else if (p.status !== R.curStatus) openRec(R.cur, true);
@@ -1318,11 +1319,44 @@ $("#mergeBtn").onclick = async () => {
   catch (err) { toast(esc(err.message), true); }
 };
 
+/* past streams kept for cutting by hand */
+async function loadStreams() {
+  let r;
+  try { r = await api("/api/streams"); } catch (e) { return; }
+  R.streams = r.streams || [];
+  const box = $("#streamList");
+  if (!R.streams.length) { box.innerHTML = `<div class="empty small">Past streams Frenzo processed are kept here for 2 days, so you can cut moments yourself.</div>`; return; }
+  box.innerHTML = R.streams.map((s) => `<div class="prt ${R.cur === "stream:" + s.id ? "on" : ""}" data-stream="${esc(s.id)}">
+      <div style="min-width:0"><div class="prt-t">${esc(s.author || s.login || "?")} · ${esc((s.title || "").slice(0, 60))}</div>
+        <div class="prt-m"><span>${hms(s.duration)}</span><span>${(s.moments || []).length} moments</span>
+          ${(s.viewer || []).length ? `<span class="y">${s.viewer.length} viewer clips</span>` : ""}
+          <span class="muted">until ${clock(s.expires)}</span></div></div></div>`).join("");
+}
+$("#streamList").addEventListener("click", (e) => { const row = e.target.closest("[data-stream]"); if (row) openStream(row.dataset.stream); });
+async function openStream(sid) {
+  const s = (R.streams || []).find((x) => x.id === sid);
+  if (R.cur !== "stream:" + sid) { R.start = R.end = null; }
+  R.cur = "stream:" + sid;
+  renderRecList(); loadStreams();
+  $("#recEmpty").classList.add("hidden"); $("#recBody").classList.remove("hidden");
+  $("#recTitle").textContent = `${(s && (s.author || s.login)) || "Past stream"} · ${((s && s.title) || "").slice(0, 70)}`;
+  $("#recMeta").textContent = s ? `${hms(s.duration)} · preview (the clip is made from the 1080p stream)` : "";
+  document.querySelectorAll(".stream-only").forEach((el) => el.classList.remove("hidden"));
+  try { R.data = await api(`/api/streams/${sid}`); } catch (e) { toast(esc(e.message), true); return; }
+  R.data.moments = (R.data.moments || []).map((m) => ({ t: m.t, why: (m.score != null ? `[${m.score}] ` : "") + m.why }));
+  $("#recNotReady").classList.add("hidden");
+  const src = `/media-stream/${sid}`;
+  if (rv.getAttribute("src") !== src) { rv.setAttribute("src", src); rv.load(); }
+  renderMoments();
+  drawGraph();
+}
+
 const rv = $("#recVideo");
 function closeRec() { R.cur = null; R.data = null; rv.pause(); rv.removeAttribute("src"); rv.load(); $("#recBody").classList.add("hidden"); $("#recEmpty").classList.remove("hidden"); renderRecList(); }
 async function openRec(id, refresh) {
   const p = findPart(id);
   if (!p) return;
+  document.querySelectorAll(".stream-only").forEach((el) => el.classList.add("hidden"));
   if (!refresh && R.cur !== id) { R.start = R.end = null; }
   R.cur = id; R.curStatus = p.status;
   renderRecList();
@@ -1377,6 +1411,9 @@ function drawGraph() {
   // clips made (yellow flags) and flagged moments (white dots)
   (d.clips || []).forEach((c) => { g.fillStyle = "#FFD60A"; g.fillRect(x(c.t), 4, Math.max(3, x(c.t + (c.dur || 20)) - x(c.t)), 8); });
   (d.moments || []).forEach((m) => { g.fillStyle = "#fff"; g.beginPath(); g.arc(x(m.t), 22, 3.5, 0, 7); g.fill(); });
+  // past streams: viewer clips (blue bars at the bottom) and YouTube "most replayed" peaks (pink)
+  (d.viewer || []).forEach((v) => { g.fillStyle = "rgba(79,195,255,.85)"; g.fillRect(x(v.a), H - 5, Math.max(3, x(v.b) - x(v.a)), 5); });
+  (d.heat || []).forEach((h) => { g.fillStyle = "#FF6AD5"; g.beginPath(); g.moveTo(x(h.t), 30); g.lineTo(x(h.t) - 5, 40); g.lineTo(x(h.t) + 5, 40); g.fill(); });
   // playhead
   g.fillStyle = "#fff"; g.fillRect(x(rv.currentTime || 0) - 1, 0, 2, H);
 }
@@ -1460,9 +1497,10 @@ async function makeRecClip(mode) {
   const title = $("#rcTitle").value.trim(), hl = $("#rcHighlight").value.trim();
   if (mode === "manual" && !title) { toast("Write a title (or use Make clip with Claude)", true); $("#rcTitle").focus(); return; }
   if (hl && title && !title.toLowerCase().includes(hl.toLowerCase())) { toast("The yellow word must be part of the title", true); return; }
+  const isStream = String(R.cur).startsWith("stream:");
   try {
-    await api(`/api/recordings/${R.cur}/cut`, { method: "POST", body: { start: R.start, end: R.end, mode, title, highlight: hl,
-      emoji: $("#rcEmoji").value, context: $("#rcContext").value.trim() } });
+    await api(isStream ? `/api/streams/${R.cur.slice(7)}/cut` : `/api/recordings/${R.cur}/cut`, { method: "POST",
+      body: { start: R.start, end: R.end, mode, title, highlight: hl, emoji: $("#rcEmoji").value, context: $("#rcContext").value.trim() } });
     toast(`<b>Making your clip</b> · it appears in Clips in a minute or two`);
     $("#rcTitle").value = $("#rcHighlight").value = $("#rcContext").value = "";
   } catch (err) { toast(esc(err.message), true); }
