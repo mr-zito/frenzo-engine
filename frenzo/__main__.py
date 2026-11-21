@@ -84,6 +84,7 @@ def main():
     v.add_argument("--streamer", help="only this streamer (or the folder name for --url clips)")
     v.add_argument("--any-game", action="store_true", help="don't require the game in the stream title")
     v.add_argument("--no-ai", action="store_true", help="skip Claude, use the simple loudness rule")
+    v.add_argument("--report", help="(tests) write moments.csv + report.json here; clips go to <report>/clips")
     r = sub.add_parser("fix", help="re-render existing clips (from their raw.mp4) in the current style")
     r.add_argument("--streamer", help="only this streamer's clips")
     e = sub.add_parser("reedit", help="ask Claude to re-edit one clip folder")
@@ -140,8 +141,11 @@ def main():
         return run_test(cfg, args.video, args.at, args.top, args.streamer, args.no_ai)
     if args.cmd == "vods":
         from .vods import run_vods
-        return run_vods(load_config(args.config), args.hours, args.top, args.url, args.streamer,
-                        args.any_game, args.no_ai)
+        cfg = load_config(args.config)
+        if args.report:                          # test run: clips go next to the report, nothing else changes
+            cfg["storage"]["output_dir"] = os.path.join(os.path.abspath(args.report), "clips")
+        return run_vods(cfg, args.hours, args.top, args.url, args.streamer, args.any_game, args.no_ai,
+                        report_dir=os.path.abspath(args.report) if args.report else None)
     if args.cmd == "fix":
         from .redo import run_redo
         return run_redo(load_config(args.config), args.streamer)

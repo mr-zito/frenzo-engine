@@ -340,14 +340,17 @@ class ClipJudge:
                 if wrapper.get("is_error"):
                     raise RuntimeError(str(wrapper.get("result", ""))[:150])
                 text = wrapper.get("result", out)
+                cost = wrapper.get("total_cost_usd")
             except ValueError:
-                pass
+                cost = None
             m = re.search(r"\{.*\}", text, re.S)
             if not m:
                 raise RuntimeError((text or res.stderr.decode("utf-8", "replace"))[:150])
             d = json.loads(m.group(0))
             if "viral_score" not in d:
                 raise RuntimeError("answer had no score")
+            if isinstance(cost, (int, float)):
+                d["_cost_usd"] = round(float(cost), 5)
             return d
         except Exception as e:
             log(f"Claude Code didn't answer ({str(e)[:150]}); using the chat backup rule for this moment", "ai")

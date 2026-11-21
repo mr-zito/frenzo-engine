@@ -15,9 +15,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
-from . import campaign
+from . import campaign, crowd, replay, scoring
 from .ai import ClipJudge
 import numpy as np
 
@@ -171,13 +172,84 @@ def _keep_alive(work, every=600):
     return stop
 
 
-def clip_past_stream(cfg, scfg, vod, pipeline, top):
+def _merge_moments(found, gap=60):
+    """[(sec, why, strength, extras)] -> merged moments (several signals within `gap` s = one stronger moment).
+    Crowd signals come first in `found`, so a moment's time follows the crowd when it has one."""
+    moments = []
+    for sec, why, strength, extra in found:
+        near = [m for m in moments if abs(m["sec"] - sec) < gap]
+        if near:
+            m = near[0]
+            if why.split(":")[0] not in m["why"]:
+                m["why"] += " + " + why
+            m["clips"] += [c for c in extra.get("clips") or [] if all(c.id != x.id for x in m["clips"])]
+            for k, v in (extra.get("signals") or {}).items():
+                m["signals"][k] = max(m["signals"].get(k, 0), v)
+            if extra.get("span"):
+                a, b = extra["span"]
+                m["span"] = (min(a, m["span"][0]), max(b, m["span"][1])) if m["span"] else (a, b)
+                m["sec"] = m["span"][1] - 2
+            continue
+        moments.append({"sec": sec, "why": why, "clips": list(extra.get("clips") or []),
+                        "signals": dict(extra.get("signals") or {}), "span": extra.get("span"),
+                        "crowd": bool(extra) or why.startswith("chat replay")})
+    for m in moments:
+        m["score"] = scoring.priority(replay.as_cand(m["why"], m["clips"], m["signals"]))
+    return moments
+
+
+def _report_row(report, vod, m, c, stage_s):
+    if not report:
+        return
+    d = c.judged or {}
+    report.append({"stream": vod["id"], "time": f"{int(m['sec'] // 3600)}:{int(m['sec'] % 3600 // 60):02d}:{int(m['sec'] % 60):02d}",
+                   "second": round(m["sec"], 1), "signals": m["why"][:300], "crowd": m["crowd"],
+                   "combined_score": m["score"], "claude_score": d.get("viral_score"),
+                   "kept": bool(c.folder), "status": c.status or ("kept" if c.folder else "rejected"),
+                   "reason": str(d.get("reason") or c.status or "")[:300], "folder": c.folder or "",
+                   "seconds_to_clip": round(stage_s, 1), "claude_cost_usd": d.get("_cost_usd")})
+
+
+def clip_past_stream(cfg, scfg, vod, pipeline, top, report=None):
     tag = scfg.get("key", scfg["login"])
     work = tempfile.mkdtemp(prefix="frenzo_vod_")
     stop_beat = _keep_alive(work)              # the app's temp cleanup must never delete this folder while we use it
     before, after = cfg["clips"]["context_before"], cfg["clips"]["context_after"]
+    det, pc = cfg["detection"], cfg.get("past") or {}
     saved = saved_extra = 0
+    times = {}
     try:
+        # ---- crowd signals first (viewer clips, heatmap, chat replay), in parallel with the preview download ----
+        crowd_res = {}
+
+        def crowd_job():
+            t = time.time()
+            try:
+                info = None
+                if "youtu" in vod["url"] and pc.get("heatmap", True):
+                    try:
+                        with _ydl() as ydl:
+                            info = ydl.extract_info(vod["url"], download=False)
+                    except Exception as e:
+                        log(f"couldn't read the video's details ({str(e)[:100]})", tag)
+                api = None
+                if replay.twitch_vod_id(vod["url"]):
+                    from .config import placeholder
+                    tw = cfg["twitch"]
+                    if not placeholder(tw["client_id"]) and not placeholder(tw["client_secret"]):
+                        from .twitch import TwitchAPI
+                        api = TwitchAPI(tw["client_id"], tw["client_secret"])
+                chat_dir = os.path.join(work, "chat")
+                os.makedirs(chat_dir, exist_ok=True)
+                crowd_res["found"], crowd_res["summary"], crowd_res["chat"] = replay.gather(cfg, scfg, vod, chat_dir, api, info)
+            except Exception as e:
+                log(f"crowd signals failed ({str(e)[:120]})", tag)
+                crowd_res["found"], crowd_res["summary"], crowd_res["chat"] = [], {}, None
+            times["crowd_signals"] = round(time.time() - t, 1)
+        crowd_thread = threading.Thread(target=crowd_job, daemon=True)
+        crowd_thread.start()
+
+        t = time.time()
         log(f"past stream: '{vod['title'][:60]}' ({vod['duration'] / 3600:.1f} h) - downloading a small preview", tag)
         # a tiny low-resolution copy (sound + picture): enough to hear reactions and see gameplay chaos
         try:
@@ -187,23 +259,29 @@ def clip_past_stream(cfg, scfg, vod, pipeline, top):
         preview = _find(work, "preview")
         if not preview:
             raise RuntimeError("preview download produced no file")
+        times["preview_download"] = round(time.time() - t, 1)
 
-        found = []      # (second, why, strength)
+        found = []      # (second, why, strength, extras)
+        t = time.time()
         log("listening for streamer reactions...", tag)
-        for sec, label, strength in scan_file(preview, cfg["detection"].get("voice_sensitivity", "normal")):
-            found.append((sec, f"streamer reaction: {label}", strength))
-        if cfg["detection"].get("chaos_triggers", True):
+        for sec, label, strength in scan_file(preview, det.get("voice_sensitivity", "normal")):
+            found.append((sec, f"streamer reaction: {label}", strength, {}))
+        times["voice_scan"] = round(time.time() - t, 1)
+        if det.get("chaos_triggers", True):
+            t = time.time()
             log("watching the gameplay for bugs / crazy physics...", tag)
             try:
-                found += [(sec, f"gameplay chaos: {r:.1f}x wilder than normal (bug/physics?)", r * 4)
-                          for sec, r in chaos_scan(preview, cfg["detection"])]
+                found += [(sec, f"gameplay chaos: {r:.1f}x wilder than normal (bug/physics?)", r * 4, {})
+                          for sec, r in chaos_scan(preview, det)]
             except Exception as e:
                 log(f"chaos scan skipped ({str(e)[:80]})", tag)
+            times["chaos_scan"] = round(time.time() - t, 1)
         # campaign: EXTRA content it wants (searched on top of everything; the regular moments stay the same)
         camp = campaign.of(scfg)
         camp_speech = campaign.speech_pattern(camp)
         extra_found = []
         if scfg.get("hot_takes") or camp_speech is not None:
+            t = time.time()
             log("listening for " + ("hot takes and NPC moments" if scfg.get("hot_takes") else "")
                 + (" + " if scfg.get("hot_takes") and camp_speech is not None else "")
                 + ("the campaign's phrases" if camp_speech is not None else "") + " (this takes a while)...", tag)
@@ -214,39 +292,52 @@ def clip_past_stream(cfg, scfg, vod, pipeline, top):
                         extra_found.append((sec, f'campaign content: streamer said "{snip[:90]}"', strength))
                     else:
                         found.append((sec, (f'streamer talking about an NPC / something weird: "{snip[:90]}"'
-                                            if kind == "npc" else f'hot take: "{snip[:90]}"'), strength))
+                                            if kind == "npc" else f'hot take: "{snip[:90]}"'), strength, {}))
             except Exception as e:
                 log(f"hot-take scan skipped ({str(e)[:80]})", tag)
-        # strongest first, one moment per minute; several signals close together = stronger
-        found.sort(key=lambda e: -e[2])
-        moments = []
-        for sec, why, strength in found:
-            near = [m for m in moments if abs(m[0] - sec) < 60]
-            if near:
-                if why.split(":")[0] not in near[0][1]:
-                    near[0][1] += " + " + why
-                continue
-            moments.append([sec, why])
-            if top and len(moments) >= top * 2:         # top 0 = no limit: every moment found is tried
-                break
-        moments = [tuple(m) for m in moments]
+            times["speech_scan"] = round(time.time() - t, 1)
+
+        crowd_thread.join()
+        crowd_found = sorted(crowd_res.get("found") or [], key=lambda e: -e[2])
+        chat = crowd_res.get("chat")
+        if crowd_res.get("summary"):
+            log("crowd signals: " + ", ".join(f"{k} {v}" for k, v in crowd_res["summary"].items()), tag)
+        # crowd first, then the detectors (strongest first inside each group) -> merged moments, best first
+        moments = _merge_moments(crowd_found + sorted(found, key=lambda e: -e[2]))
+        moments.sort(key=lambda m: -m["score"])
+        if top:
+            moments = moments[: top * 2]
         if not moments:
-            moments = [(s, "loud moment") for s in loud_peaks(preview, top * 2 if top else 20)]
-        log(f"{len(moments)} candidate moment(s) found", tag)
+            moments = [{"sec": s, "why": "loud moment", "clips": [], "signals": {}, "span": None, "crowd": False,
+                        "score": 0.0} for s in loud_peaks(preview, top * 2 if top else 20)]
+        n_crowd = sum(1 for m in moments if m["crowd"])
+        log(f"{len(moments)} candidate moment(s) found ({n_crowd} with crowd signals, "
+            f"{len(moments) - n_crowd} from the detectors only)", tag)
+        if report is not None:
+            report_meta = report.setdefault("_meta", {})
+            report_meta[vod["id"]] = {"stages": times, "crowd": crowd_res.get("summary") or {},
+                                      "moments": len(moments), "crowd_moments": n_crowd}
         # campaign moments: an extra group (not already covered by a regular moment), with its own limit
         extra = []
         for sec, why, strength in sorted(extra_found, key=lambda e: -e[2]):
-            if all(abs(m[0] - sec) >= 60 for m in list(moments) + extra) and (not top or len(extra) < top * 2):
-                extra.append((sec, why))
+            if all(abs(m["sec"] - sec) >= 60 for m in moments) and all(abs(x["sec"] - sec) >= 60 for x in extra) \
+                    and (not top or len(extra) < top * 2):
+                extra.append({"sec": sec, "why": why, "clips": [], "signals": {}, "span": None, "crowd": False,
+                              "score": scoring.priority(replay.as_cand(why))})
         if extra:
             log(f"{len(extra)} extra moment(s) with the campaign's content", tag)
-        todo = [(sec, why, "main") for sec, why in sorted(moments)] + [(sec, why, "campaign") for sec, why in sorted(extra)]
-        for i, (sec, why, group) in enumerate(todo):
+        todo = [(m, "main") for m in moments] + [(m, "campaign") for m in extra]
+        clip_lead = float(det.get("clip_lead_in", 25))
+        for i, (m, group) in enumerate(todo):
             if top and (saved if group == "main" else saved_extra) >= top:
                 continue
+            t_moment = time.time()
+            sec = m["sec"]
             pad = cfg["render"].get("raw_padding", 60)          # extra minute each side for raw.mp4
-            a = max(0.0, sec - before - pad)
-            b = sec + after + pad
+            lo = min(sec - before, (m["span"][0] - clip_lead) if m["span"] else sec - before)
+            hi = max(sec + after, (m["span"][1] + 10) if m["span"] else sec + after)
+            a = max(0.0, lo - pad)
+            b = hi + pad
             seg, start = None, a
             for attempt in range(3):
                 stem = f"seg{i}_{attempt}"
@@ -260,8 +351,8 @@ def clip_past_stream(cfg, scfg, vod, pipeline, top):
                 seg = _find(work, stem)
                 if not seg:
                     break
-                found = _seg_start(preview, seg, a)
-                start = a if found is None else found
+                got = _seg_start(preview, seg, a)
+                start = a if got is None else got
                 drift = start - a
                 if abs(drift) <= 5 or before <= sec - start <= before + pad + 20:
                     break                            # close enough: the moment is inside with its context
@@ -280,18 +371,31 @@ def clip_past_stream(cfg, scfg, vod, pipeline, top):
                 continue
             c = Candidate(
                 login=scfg["login"], display_name=vod["author"], rec_path=seg, anchor=sec - start,
-                source=f"past stream, {why} at {sec / 60:.0f} min", streamer_cfg=scfg,
+                source=f"past stream, {m['why']} at {sec / 60:.0f} min", streamer_cfg=scfg,
                 game=cfg["game"]["name"], platform=scfg["platform"], stream_title=vod["title"],
+                signals=dict(m["signals"]), flagged_wall=time.time(),
             )
-            if pipeline.process(c):
+            if m["clips"]:
+                c.clips = list(m["clips"])
+                c.clip_span = (m["span"][0] - start, m["span"][1] - start) if m["span"] else None
+                if crowd.strong(crowd.ClipMoment(0, 0, c.clips), cfg):
+                    c.keep_bonus = int(det.get("clip_keep_bonus", 1))
+            if chat is not None:                     # the chat replay, read like the live chat
+                c.chat, c.t0 = chat, start
+            c.priority = m["score"]
+            pipeline.process(c)
+            if c.folder:
                 if group == "main":
                     saved += 1
                 else:
                     saved_extra += 1
+            _report_row(report.setdefault("rows", []) if report is not None else None, vod, m, c,
+                        time.time() - t_moment)
             try:
                 os.remove(seg)
             except OSError:
                 pass
+        _keep_preview(cfg, scfg, vod, preview, moments, crowd_res.get("summary") or {})
     finally:
         stop_beat.set()
         shutil.rmtree(work, ignore_errors=True)
@@ -300,7 +404,12 @@ def clip_past_stream(cfg, scfg, vod, pipeline, top):
     return saved + saved_extra
 
 
-def run_vods(cfg, hours=36, top=0, urls=None, streamer=None, any_game=False, no_ai=False):
+def _keep_preview(cfg, scfg, vod, preview, moments, crowd_summary):
+    """Phase 6 keeps the preview for cutting by hand; until then, nothing."""
+    return None
+
+
+def run_vods(cfg, hours=36, top=0, urls=None, streamer=None, any_game=False, no_ai=False, report_dir=None):
     require_binary("ffmpeg")
     try:
         import yt_dlp  # noqa: F401
@@ -353,10 +462,35 @@ def run_vods(cfg, hours=36, top=0, urls=None, streamer=None, any_game=False, no_
 
     log(f"{len(jobs)} past stream(s) to clip")
     total = 0
+    report = {} if report_dir else None
     for scfg, vod in jobs:
         try:
-            total += clip_past_stream(cfg, scfg, vod, pipeline, top)
-            mark(vod["id"])
+            total += clip_past_stream(cfg, scfg, vod, pipeline, top, report)
+            if not report_dir:                   # test runs don't mark the stream as done
+                mark(vod["id"])
         except Exception as e:
             log(f"failed: {str(e)[:200]}", scfg.get("key", scfg["login"]))
+        if report_dir:
+            write_report(report_dir, report)
     log(f"all past streams done: {total} clip(s) saved in {cfg['storage']['output_dir']}")
+
+
+def write_report(folder, report):
+    """moments.csv (one line per moment tried) + report.json (stage times, crowd summary, Claude cost)."""
+    import csv
+    os.makedirs(folder, exist_ok=True)
+    rows = report.get("rows") or []
+    cols = ["stream", "time", "second", "signals", "crowd", "combined_score", "claude_score", "kept", "status",
+            "reason", "folder", "seconds_to_clip", "claude_cost_usd"]
+    with open(os.path.join(folder, "moments.csv"), "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k) for k in cols})
+    meta = dict(report.get("_meta") or {})
+    costs = [r["claude_cost_usd"] for r in rows if isinstance(r.get("claude_cost_usd"), (int, float))]
+    meta["_totals"] = {"moments_tried": len(rows), "kept": sum(1 for r in rows if r.get("kept")),
+                       "crowd_moments_tried": sum(1 for r in rows if r.get("crowd")),
+                       "claude_cost_usd": round(sum(costs), 4) if costs else None}
+    with open(os.path.join(folder, "report.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=1)

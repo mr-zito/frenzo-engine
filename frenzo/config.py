@@ -62,6 +62,8 @@ DEFAULTS = {
     "past": {
         "crowd_signals": True,          # viewer clips, chat replay and YouTube "Most replayed" before the detectors
         "chat_replay": True,
+        "chat_replay_max_minutes": 180, # a long stream's chat replay downloads slowly: use what came by then
+        "twitch_downloader": "",        # path of TwitchDownloaderCLI.exe (Twitch chat replay); empty = on PATH
         "heatmap": True,
         "keep_preview_hours": 48,       # keep each past stream's preview so you can cut it by hand (0 = delete)
         "piece_lead": 30,               # harvest: seconds downloaded before a viewer clip
