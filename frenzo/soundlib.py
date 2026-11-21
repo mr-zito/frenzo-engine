@@ -102,13 +102,14 @@ def rules(lib):
     return text.strip()
 
 
-def fix_id(sid, lib, allow_music=False, allow_explicit=False):
-    """A sound id Claude wrote -> the exact library id (close typos fixed), or None if unknown / not allowed."""
+def fix_id(sid, lib, allow_music=False, allow_explicit=False, only=None):
+    """A sound id Claude wrote -> the exact library id (close typos fixed), or None if unknown / not allowed.
+    only: the owner's sound list (ids outside it are refused)."""
     lib_ids = load(lib)
     sid = str(sid or "").strip().lower().replace(" ", "-").replace("_", "-")
     if sid.endswith(".flac"):
         sid = sid[:-5]
-    ok = {k for k, e in lib_ids.items() if allowed(e, allow_music, allow_explicit)}
+    ok = {k for k, e in lib_ids.items() if allowed(e, allow_music, allow_explicit) and (not only or k in only)}
     if sid in ok:
         return sid
     near = difflib.get_close_matches(sid, list(ok), n=1, cutoff=0.82)
@@ -175,3 +176,33 @@ def remember(cfg, rcfg, sounds):
             os.replace(path + ".tmp", path)
         except OSError:
             pass
+
+
+# ------------------------------------------------------------------------- your sound guide (render.sound_guide)
+EFFECT_FX = {"zoom": ["zoom"], "flash": ["flash"], "slow_zoom": ["slow_zoom"], "cam_zoom": ["cam_zoom"],
+             "freeze_zoom": ["zoom_hold"], "silence_after": ["cam_zoom"], "hook_rewind": []}
+
+
+def guide(rcfg, lib=None):
+    """{id: entry} of the owner's sound list (only ids that exist in the library), in their order. {} = no guide."""
+    entries = [g for g in (rcfg.get("sound_guide") or []) if isinstance(g, dict) and g.get("id")]
+    if not entries:
+        return {}
+    known = load(lib) if lib is not None else None
+    return {g["id"]: g for g in entries if known is None or g["id"] in known}
+
+
+def guide_prompt(rcfg, lib):
+    """The owner's sound list for Claude: id | when | length | effect (the effect is added by code)."""
+    entries = load(lib)
+    lines = []
+    for sid, g in guide(rcfg, lib).items():
+        e = entries[sid]
+        eff = {"freeze_zoom": "picture pauses + zooms on the item while it plays", "cam_zoom": "zoom on the webcam",
+               "slow_zoom": "slow zoom-in on what's about to happen", "flash": "white flash",
+               "silence_after": "game goes silent for a second, zoom on the webcam",
+               "hook_rewind": "rewind from the webcam-only reaction to the start"}.get(g.get("effect") or "", "")
+        lines.append(f"- {sid} ({float(e.get('duration') or 0):.1f}s): {g.get('when', '')}"
+                     + (" [RARE: only when the moment really calls for it]" if g.get("rare") else "")
+                     + (f" -> {eff}" if eff else ""))
+    return "\n".join(lines)

@@ -129,20 +129,31 @@ def _windows(ranges):
     return "min(1," + "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in ranges) + ")"
 
 
-def punch_filter(fx_events, w, h, hook_zoom=False):
-    """Picture effects on the GAMEPLAY band only (never the webcam band or the captions), at the cue times
-    Claude marked: zoom = punch-in that eases out, shake, flash; hook_zoom = frame 0 starts at 1.1x and eases
-    to 1.0 in half a second. Returns '' when there is nothing to do, else ',filter,filter...'."""
+def punch_filter(fx_events, w, h, hook_zoom=False, band="game"):
+    """Picture effects on one band (the gameplay band, or the webcam band with band="cam"), at the sound cues:
+    zoom = punch-in that eases out, shake, flash, slow_zoom = slow zoom-in while a suspense sound plays,
+    zoom_hold = zoomed in during a pause (anime-wow), cam_zoom = zoom on the webcam (awkward / staring at camera).
+    hook_zoom = frame 0 starts at 1.1x and eases to 1.0 in half a second. Events: (t, [fx], seconds).
+    Returns '' when there is nothing to do, else ',filter,filter...'."""
     zt, shakes, flashes = [], [], []
-    for t, fx in fx_events or []:
-        t = float(t)
+    for ev in fx_events or []:
+        t, fx = float(ev[0]), ev[1]
+        d = max(0.4, min(4.0, float(ev[2]))) if len(ev) > 2 and ev[2] else 1.0
+        if band == "cam":
+            if "cam_zoom" in fx:                      # ease in over 0.2 s, hold while the sound plays
+                zt.append(f"0.18*min(1,(t-{t:.3f})/0.2)*between(t,{t:.3f},{t + d:.3f})")
+            continue
+        if "slow_zoom" in fx:                         # ramps up to 1.18x over the suspense sound
+            zt.append(f"0.18*min(1,max(0,(t-{t - d:.3f})/{d:.3f}))*between(t,{t - d:.3f},{t + 0.4:.3f})")
+        if "zoom_hold" in fx:
+            zt.append(f"0.3*min(1,(t-{t:.3f})/0.15)*between(t,{t:.3f},{t + d:.3f})")
         if "zoom" in fx:
             zt.append(f"0.12*between(t,{t:.3f},{t + 0.6:.3f})*exp(-(t-{t:.3f})*7)")
         if "shake" in fx:
             shakes.append((t, t + 0.35))
         if "flash" in fx:
             flashes.append((t, t + 0.06))
-    if hook_zoom:
+    if hook_zoom and band == "game":
         zt.append("0.1*max(0,1-t/0.5)")
     if not zt and not shakes and not flashes:
         return ""
@@ -157,23 +168,34 @@ def punch_filter(fx_events, w, h, hook_zoom=False):
     return out
 
 
-def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, hook_zoom=False):
+def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, hook_zoom=False, cam_only_until=0.0):
+    """cam_only_until: during the first N seconds only the webcam is shown, full screen (the reaction-first hook:
+    the viewer sees the streamer react, not what happened)."""
     fx = min(max(focus_x, 0.0), 1.0)
     if layout == "reel" and cam:
         cam = {k: float(cam[k]) for k in ("x", "y", "w", "h")}
         gh = REEL_GAME_H
-        return (
-            f"{src}split=2[s1][s2];"
-            f"[s1]crop=w=iw*{cam['w']:.4f}:h=ih*{cam['h']:.4f}:x=iw*{cam['x']:.4f}:y=ih*{cam['y']:.4f},"
+        crop_cam = f"crop=w=iw*{cam['w']:.4f}:h=ih*{cam['h']:.4f}:x=iw*{cam['x']:.4f}:y=ih*{cam['y']:.4f}"
+        full = ""
+        if cam_only_until and cam_only_until > 0.2:
+            full = (f"[s3]{crop_cam},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},"
+                    f"unsharp=5:5:0.7:5:5:0,setsar=1[camfull];")
+        out = (
+            f"{src}split={3 if full else 2}[s1][s2]{'[s3]' if full else ''};"
+            f"[s1]{crop_cam},"
             f"scale={W}:{REEL_CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{REEL_CAM_H},"
-            f"unsharp=5:5:0.7:5:5:0,setsar=1[cam];"
+            f"unsharp=5:5:0.7:5:5:0,setsar=1{punch_filter(fx_events, W, REEL_CAM_H, band='cam')}[cam];"
             f"[s2]crop=w=ih/{zoom}*{W}/{gh}:h=ih/{zoom}:x='clip(iw*{fx:.4f}-ow/2,0,iw-ow)':y=(ih-oh)/2,"
             f"scale={W}:{gh}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1{punch_filter(fx_events, W, gh, hook_zoom)}[game];"
-            "[cam][game]vstack=inputs=2[v0]"
+            + full
+            + ("[cam][game]vstack=inputs=2[vst];[vst][camfull]overlay=0:0:enable='lt(t," + f"{cam_only_until:.3f}" + ")'[v0]"
+               if full else "[cam][game]vstack=inputs=2[v0]")
         )
+        return out
     if layout in ("focus", "reel"):
+        evs = [(e[0], ["zoom_hold" if f == "cam_zoom" else f for f in e[1]]) + tuple(e[2:]) for e in fx_events or []]
         return (f"{src}crop=w=ih*{W}/{H}:h=ih:x='clip(iw*{fx:.4f}-ow/2,0,iw-ow)':y=0,"
-                f"scale={W}:{H}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1{punch_filter(fx_events, W, H, hook_zoom)}[v0]")
+                f"scale={W}:{H}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1{punch_filter(evs, W, H, hook_zoom)}[v0]")
     if layout == "stacked" and cam:
         return (
             f"{src}split=2[s1][s2];"
@@ -203,14 +225,15 @@ def _fontsdir(out_dir):
 
 def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, raw_pad=60,
            segments=None, title_png=None, seam_y=None, mixed_audio=None, fx_events=None, hook_zoom=False,
-           speeds=None):
+           speeds=None, cam_only_until=0.0):
     """start: where the clip starts in the recording. segments: jump-cut pieces as (a, b) seconds
     relative to 'start' (None = one piece of length dur). sfx: (file, seconds in the OUTPUT).
     mixed_audio: the finished sound (sound pass) to use instead of the game audio + sfx.
     fx_events: [(output second, ["zoom", "shake", "flash"])] on the gameplay band. speeds: per piece (0.5 = slow-mo)."""
     os.makedirs(out_dir, exist_ok=True)
     segments = [(float(a), float(b)) for a, b in (segments or [(0.0, dur)])]
-    speeds = [max(0.5, min(1.0, float(s or 1.0))) for s in (speeds or [1.0] * len(segments))]
+    # speeds: 0.5 = slow motion; much lower = a freeze (a pause on one frame while a sound plays)
+    speeds = [max(0.005, min(1.0, float(s or 1.0))) for s in (speeds or [1.0] * len(segments))]
     dur = sum((b - a) / sp for (a, b), sp in zip(segments, speeds))
     span = max(b for _, b in segments)             # a hook piece can come first and be later in the source
     fonts = _fontsdir(out_dir)
@@ -229,12 +252,15 @@ def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, 
     for i, (a, b) in enumerate(segments):
         sp = speeds[i]
         vslow = f",setpts=PTS/{sp:.3f}" if abs(sp - 1) > 1e-3 else ""
-        aslow = f",atempo={max(0.5, min(1.0, sp)):.3f}" if abs(sp - 1) > 1e-3 else ""
+        piece = (b - a) / sp
+        aslow = ("" if abs(sp - 1) <= 1e-3 else f",atempo={sp:.3f}" if sp >= 0.5 else
+                 f",volume=0,apad=whole_dur={piece:.3f},atrim=0:{piece:.3f}")         # freeze: silent
         graph += (f";[vs{i}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS{vslow}[vp{i}]"
                   f";[as{i}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS{aslow}[ap{i}]")
     graph += ";" + "".join(f"[vp{i}][ap{i}]" for i in range(k)) + f"concat=n={k}:v=1:a=1[vcat][acat]"
     graph += ";" + video_filter(layout, cam, focus_x, rcfg.get("game_zoom", 1.0), src="[vcat]",
-                                fx_events=fx_events if rcfg.get("punch_fx", True) else None, hook_zoom=hook_zoom)
+                                fx_events=fx_events if rcfg.get("punch_fx", True) else None, hook_zoom=hook_zoom,
+                                cam_only_until=cam_only_until)
     v0 = "[v0]"
     if rcfg.get("censor_regions"):                 # nudity: pixelated spots (under the captions and the title)
         from .censor import filter_graph

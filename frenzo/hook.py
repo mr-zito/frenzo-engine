@@ -118,7 +118,7 @@ def apply_slowmo(segs, slow, max_len=2.0):
     return out, sp
 
 
-def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None):
+def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None, cap=0):
     """A sound must land in the first 1.0 s; a cold open / reaction-first gets its rewind or scratch on the cut back.
     Returns (cues, notes)."""
     notes = []
@@ -130,6 +130,8 @@ def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None):
                 cues.append({"t": round(hook_len, 3), "sfx": sid, "role": "support", "align": "start", "gain_db": -3.0,
                              "stop": 0.0, "duck": False, "kind": "transition", "max_len": 1.5, "fx": [], "auto": True})
                 notes.append(f"added {sid} on the cut back at {hook_len:.2f}s")
+    if cap and len(cues) >= cap:                     # your cap wins over the "sound in the first second" rule
+        return sorted(cues, key=lambda c: c["t"]), notes
     if not any(c["t"] < 1.0 for c in cues):
         sid = next((fix_id(s, lib) for s in OPEN_SFX if fix_id(s, lib)), None)
         if sid:

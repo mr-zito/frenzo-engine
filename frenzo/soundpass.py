@@ -53,7 +53,10 @@ def cut_game_audio(rec, start, segments, out_wav, speeds=None):
     for i, (a, b) in enumerate(segments):
         sp = float((speeds or [1.0] * k)[i] or 1.0)
         tempo = ""
-        if abs(sp - 1.0) > 1e-3:
+        if sp < 0.5:                                  # a freeze: the game is silent while the picture is held
+            piece = (b - a) / sp
+            tempo = f",volume=0,apad=whole_dur={piece:.3f},atrim=0:{piece:.3f}"
+        elif abs(sp - 1.0) > 1e-3:
             parts, rest = [], sp
             while rest < 0.5:
                 parts.append("atempo=0.5")
@@ -87,7 +90,8 @@ def placed(cues, lib):
                      "file": str(Path(lib) / e["file"]), "kind": c.get("kind") or "hit", "len": round(L - head, 3),
                      "head": round(head, 3), "L": round(L, 3), "gain_db": float(c.get("gain_db") or 0),
                      "stop": float(c.get("stop") or 0), "duck": bool(c.get("duck", c.get("kind") in ("voice", "music"))),
-                     "fx": list(c.get("fx") or []), "caption": c.get("caption") or "", "role": c.get("role") or ""})
+                     "fx": list(c.get("fx") or []), "caption": c.get("caption") or "", "role": c.get("role") or "",
+                     "mute_after": float(c.get("mute_after") or 0)})
     return rows
 
 
@@ -103,6 +107,8 @@ def mix(game_wav, rows, out_wav, total, duck_db=-9.0, lufs=-14.0, game_volume=1.
             duck.append((r["starts"], r["starts"] + r["len"]))
         if r["stop"]:
             stops.append((max(0.0, r["t"] - r["stop"]), r["t"]))
+        if r.get("mute_after"):                       # the game goes silent after it (staring at the camera)
+            stops.append((r["t"] + 0.05, r["t"] + r["mute_after"]))
     dip = 10 ** (float(duck_db) / 20)
     level = f"(1-{1 - dip:.3f}*{windows(duck)})*(1-0.97*{windows(stops)})"
     graph = ";".join([f"[0:a]aresample=48000,aformat=channel_layouts=stereo,volume='{game_volume}*{level}':eval=frame[g]"]
@@ -189,7 +195,8 @@ def failing(qa):
     if not qa:
         return []
     bad = [f"{r['t']:.2f}s {r['sfx']}: {r['verdict']}" for r in qa.get("cues") or []
-           if r.get("verdict") in ("masked", "off sync")]
+           if r.get("verdict") == "masked" or r.get("verdict") == "off sync" and r.get("kind") not in QUIET_KINDS]
+    # (transitions / whooshes / risers a few frames off are listed in the report, not a reason to review)
     lufs, tp = qa.get("lufs"), qa.get("true_peak_dbfs")
     if lufs is not None and abs(lufs + 14) > 1.0:
         bad.append(f"loudness {lufs} LUFS")

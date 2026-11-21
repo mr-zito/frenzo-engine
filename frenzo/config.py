@@ -117,7 +117,34 @@ DEFAULTS = {
         "sound_library_path": "",       # empty = the installed gta-reel-sound-studio skill's gta_sfx_library
         "sound_check": True,            # run check_reel.py on every clip, auto-fix once
         "sound_safe_mode": True,        # no sounds tagged music / explicit unless the campaign allows them
-        "sound_no_repeat": 15,          # avoid sounds used in the last N clips of the account
+        "sound_no_repeat": 3,           # prefer not to reuse sounds from the account's last N clips
+        "sound_max_per_clip": 3,        # hard cap: never more sound effects than this in one clip
+        # YOUR sound list: the only sounds Frenzo uses, when to use each one, and the picture effect that goes
+        # with it (effect: zoom / flash / slow_zoom / cam_zoom / freeze_zoom / silence_after / hook_rewind).
+        # rare: true = only for a moment that really calls for it. Empty list = the whole library (old way).
+        "sound_guide": [
+            {"id": "anime-wow", "when": "the character finds a new or rare item", "effect": "freeze_zoom", "rare": True},
+            {"id": "awkward-pause", "when": "something awkward happens", "effect": "cam_zoom"},
+            {"id": "hells-kitchen-suspense", "when": "build suspense before something weird is about to happen",
+             "effect": "slow_zoom"},
+            {"id": "bua-wa-wa-wa-wa", "when": "a sexy lady / a sexy moment", "rare": True},
+            {"id": "tape-rewind", "when": "the hook: show the streamer's reaction (webcam only, no spoiler) first, "
+                                          "then rewind to what happened", "effect": "hook_rewind"},
+            {"id": "fnaf-2-hallway", "when": "suspense before a little scary moment", "effect": "slow_zoom"},
+            {"id": "bass-drop-vine-boom", "when": "right AFTER the impact, to make it funny (the character dies in a "
+                                                  "weird way, a weird NPC), the streamer looking at the camera in "
+                                                  "silence", "effect": "silence_after"},
+            {"id": "boom", "when": "an impact, or a sus moment"},
+            {"id": "flashbang-loud", "when": "a big impact, like dying to the police", "effect": "flash"},
+            {"id": "taco-bell-bong", "when": "a funny impact"},
+            {"id": "vine-boom-slowed", "when": "a dramatic impact or reveal"},
+            {"id": "cash-register", "when": "ONLY when getting cash"},
+            {"id": "apple-notification", "when": "the character gets a notification or message on the in-game phone"},
+            {"id": "rizzz", "when": "a rizz moment"},
+            {"id": "sudden-suspense", "when": "a sudden suspense beat", "effect": "slow_zoom"},
+            {"id": "whoosh-fast", "when": "a fast transition / jump cut"},
+            {"id": "faahhhh", "when": "a funny fail"},
+        ],
         "punch_fx": True,               # punch-in / shake / flash on the gameplay band at Claude's cue times
         # --- hook, captions, titles ---
         "hook": True,                   # hook rules for the first 3 seconds

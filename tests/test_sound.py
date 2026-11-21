@@ -114,3 +114,52 @@ class Sound(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Guide(unittest.TestCase):
+    """Your sound list (render.sound_guide): only those sounds, their effects, never twice, the cap."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        entries = [{"id": i, "file": f"sfx/{i}.flac", "duration": dur, "peak_s": 0.1, "tags": ["impact"]}
+                   for i, dur in (("anime-wow", 3.0), ("awkward-pause", 3.2), ("bass-drop-vine-boom", 3.8),
+                                  ("boom", 1.2), ("metal-pipe-falling", 3.0), ("taco-bell-bong", 1.6))]
+        with open(os.path.join(self.tmp.name, "library.json"), "w", encoding="utf-8") as f:
+            json.dump(entries, f)
+        soundlib._cache.clear()
+        self.lib = self.tmp.name
+        self.rcfg = {"sound_max_per_clip": 3, "sound_guide": [
+            {"id": "anime-wow", "effect": "freeze_zoom"}, {"id": "awkward-pause", "effect": "cam_zoom"},
+            {"id": "bass-drop-vine-boom", "effect": "silence_after"}, {"id": "boom"}, {"id": "taco-bell-bong"},
+            {"id": "not-in-library"}]}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_only_your_sounds_effects_no_repeat_and_cap(self):
+        to_out = viral.mapper([[0, 30]])
+        cues = [{"t": 2, "sfx": "metal-pipe-falling"},                         # not in your list: dropped
+                {"t": 3, "sfx": "awkward-pause"}, {"t": 5, "sfx": "boom", "fx": ["shake"]},
+                {"t": 6, "sfx": "boom"},                                        # twice: dropped
+                {"t": 8, "sfx": "bass-drop-vine-boom"}, {"t": 9, "sfx": "taco-bell-bong"}]   # 4th: over the cap
+        out = map_cues(cues, to_out, 30, self.lib, None, self.rcfg)
+        self.assertEqual([c["sfx"] for c in out], ["awkward-pause", "boom", "bass-drop-vine-boom"])
+        by = {c["sfx"]: c for c in out}
+        self.assertEqual(by["awkward-pause"]["fx"], ["cam_zoom"])
+        self.assertEqual(by["boom"]["fx"], [])                                  # effects come from your list only
+        self.assertEqual(by["bass-drop-vine-boom"]["mute_after"], 1.2)
+        self.assertEqual(soundlib.fix_id("metal-pipe-falling", self.lib, only={"boom"}), None)
+        self.assertEqual(list(soundlib.guide(self.rcfg, self.lib)), ["anime-wow", "awkward-pause",
+                                                                    "bass-drop-vine-boom", "boom", "taco-bell-bong"])
+
+    def test_freeze_cue_for_anime_wow(self):
+        from frenzo.pipeline import freeze_cue
+        self.assertEqual(freeze_cue([{"t": 10, "sfx": "anime-wow"}], self.rcfg, self.lib, [[0, 20]]), (10.0, 1.8))
+        self.assertIsNone(freeze_cue([{"t": 10, "sfx": "boom"}], self.rcfg, self.lib, [[0, 20]]))
+        self.assertIsNone(freeze_cue([{"t": 25, "sfx": "anime-wow"}], self.rcfg, self.lib, [[0, 20]]))   # cut out
+
+    def test_prompt_lists_only_your_sounds(self):
+        text = soundlib.guide_prompt(self.rcfg, self.lib)
+        self.assertIn("anime-wow (3.0s)", text)
+        self.assertNotIn("metal-pipe-falling", text)
+        self.assertNotIn("not-in-library", text)

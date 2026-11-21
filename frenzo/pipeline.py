@@ -81,6 +81,8 @@ def map_cues(cues, to_out, out_dur, lib, camp, rcfg):
     safe = rcfg.get("sound_safe_mode", True)
     music = not safe or bool((camp or {}).get("allow_music"))
     explicit = not safe or bool((camp or {}).get("allow_explicit"))
+    guide = soundlib.guide(rcfg, lib)              # your sound list: only these, each with its own effect
+    entries = soundlib.load(lib)
     out, seen = [], set()
     for cu in cues or []:
         if not isinstance(cu, dict):
@@ -89,14 +91,20 @@ def map_cues(cues, to_out, out_dur, lib, camp, rcfg):
             t = to_out(float(cu.get("t")))
         except (TypeError, ValueError):
             continue
-        sid = soundlib.fix_id(cu.get("sfx"), lib, music, explicit)
+        sid = soundlib.fix_id(cu.get("sfx"), lib, music, explicit, only=set(guide) or None)
         if t is None or sid is None or not 0 <= t < out_dur:
             continue
-        key = (sid, round(t, 1))
+        key = sid if guide else (sid, round(t, 1))    # with your list: never the same sound twice in a clip
         if key in seen:
             continue
         seen.add(key)
         fx = [f for f in (cu.get("fx") or []) if f in ("zoom", "shake", "flash")]
+        mute_after = 0.0
+        if guide:
+            eff = guide[sid].get("effect") or ""
+            fx = list(soundlib.EFFECT_FX.get(eff, []))
+            if eff == "silence_after":
+                mute_after = 1.2
         kind = cu.get("kind") if cu.get("kind") in ("hit", "voice", "music", "whoosh", "riser", "transition", "ui") \
             else "hit"
         try:
@@ -107,8 +115,31 @@ def map_cues(cues, to_out, out_dur, lib, camp, rcfg):
             gain, stop, max_len = 0.0, 0.0, 8.0
         out.append({"t": round(t, 3), "sfx": sid, "role": cu.get("role") or "", "align": cu.get("align") or "start",
                     "gain_db": gain, "stop": stop, "duck": bool(cu.get("duck", kind in ("voice", "music"))),
-                    "kind": kind, "max_len": max_len, "fx": fx})
+                    "kind": kind, "max_len": max_len, "fx": fx, "mute_after": mute_after,
+                    "dur": round(min(max_len, float(entries[sid].get("duration") or 1.0)), 3)})
+    cap = int(rcfg.get("sound_max_per_clip", 0) or 0) if guide else 0
+    if cap and len(out) > cap:                      # Claude lists the most important first: keep those
+        out = out[:cap]
     return sorted(out, key=lambda x: x["t"])
+
+
+def freeze_cue(cues, rcfg, lib, segs):
+    """anime-wow ("freeze_zoom" in your sound list): the picture pauses on that frame while the sound plays.
+    Returns (window second, seconds held) or None. Uses Claude's window-time cue, before the timeline is built."""
+    from . import soundlib
+    guide = soundlib.guide(rcfg, lib)
+    for cu in cues or []:
+        if not isinstance(cu, dict):
+            continue
+        sid = soundlib.fix_id(cu.get("sfx"), lib, only=set(guide) or None) if guide else None
+        if sid and (guide[sid].get("effect") == "freeze_zoom"):
+            try:
+                t = float(cu.get("t"))
+            except (TypeError, ValueError):
+                return None
+            if any(a + 0.3 <= t <= b - 0.3 for a, b in segs):
+                return t, min(1.8, float(soundlib.load(lib)[sid].get("duration") or 1.5))
+    return None
 
 
 def sound_check(folder, files, cues, rows, lib, game_wav, out_dur, rcfg, login):
@@ -355,7 +386,24 @@ class Pipeline:
             else:                                  # campaign length rule: never shorter than min, never longer than max
                 segs = campaign.fit_segments(segs, 0.0, win_dur, min_len, max_len)
         speeds = [1.0] * len(segs)
-        if hook_on and d.get("slowmo"):
+        frz = None
+        if rcfg.get("sound_effects", True) and rcfg.get("sound_library", True) and rcfg.get("punch_fx", True):
+            from . import soundlib
+            _lib = soundlib.find_library(rcfg)
+            frz = freeze_cue(d.get("cues"), rcfg, _lib, segs) if _lib is not None else None
+        if frz:                                    # pause on one frame (anime-wow): a near-still piece held frz[1] s
+            t_f, hold = frz
+            new, sp_new = [], []
+            for (a2, b2) in segs:
+                if a2 + 0.3 <= t_f <= b2 - 0.3:
+                    new += [[a2, t_f], [t_f, t_f + 0.04], [t_f + 0.04, b2]]
+                    sp_new += [1.0, 0.04 / hold, 1.0]
+                else:
+                    new.append([a2, b2])
+                    sp_new.append(1.0)
+            segs, speeds = new, sp_new
+            hook_notes.append(f"picture pauses {hold:.1f}s at {t_f:.1f}s (anime-wow)")
+        if hook_on and d.get("slowmo") and not frz:
             segs, speeds = hook_mod.apply_slowmo(segs, d.get("slowmo"))
             if 0.5 in speeds:
                 hook_notes.append("0.5x slow-mo on the payoff")
@@ -385,7 +433,10 @@ class Pipeline:
             if lib is None:
                 log("sound library not found (render.sound_library_path): using the old sus sound", c.login)
         if lib is not None:
-            cues_out = map_cues(d.get("cues"), to_out, out_dur, lib, camp, rcfg)
+            rc_cap = rcfg
+            if hook_on and hook_len and rcfg.get("sound_max_per_clip"):   # the rewind on the cut back counts too
+                rc_cap = dict(rcfg, sound_max_per_clip=max(1, int(rcfg["sound_max_per_clip"]) - 1))
+            cues_out = map_cues(d.get("cues"), to_out, out_dur, lib, camp, rc_cap)
             if hook_on:
                 from . import soundlib
                 safe = rcfg.get("sound_safe_mode", True)
@@ -394,9 +445,11 @@ class Pipeline:
                     return soundlib.fix_id(s, lb, not safe or bool((camp or {}).get("allow_music")),
                                            not safe or bool((camp or {}).get("allow_explicit")))
                 pref = fid(d.get("hook_sfx"), lib) if d.get("hook_sfx") else None
-                if ht == "tension" and hp:          # the riser ends on the hit
+                if ht == "tension" and hp:          # the riser / suspense sound ends on the hit
                     t_hit = to_out(hp[1])
-                    riser = pref if pref and "riser" in pref else fid("riser-air", lib)
+                    riser = next((s for s in ([pref] if pref else []) + ["riser-air", "sudden-suspense",
+                                                                           "hells-kitchen-suspense"] if fid(s, lib)), None)
+                    riser = fid(riser, lib) if riser else None
                     if t_hit is not None and riser and not any(cu["align"] == "end" and abs(cu["t"] - t_hit) < 0.3
                                                                for cu in cues_out):
                         cues_out.append({"t": round(t_hit, 3), "sfx": riser, "role": "support", "align": "end",
@@ -407,9 +460,20 @@ class Pipeline:
                     cues_out.append({"t": round(hook_len, 3), "sfx": pref, "role": "support", "align": "start",
                                      "gain_db": -3.0, "stop": 0.0, "duck": False, "kind": "transition", "max_len": 1.5,
                                      "fx": [], "auto": True})
-                cues_out, notes = hook_mod.ensure_opening_sound(cues_out, ht, hook_len, lib, fid)
-                hook_notes += notes
-            fx_events = [(cu["t"], cu["fx"]) for cu in cues_out if cu.get("fx")]
+                cap = int(rcfg.get("sound_max_per_clip", 0) or 0) if soundlib.guide(rcfg, lib) else 0
+                if not cap or len(cues_out) < cap:
+                    cues_out, notes = hook_mod.ensure_opening_sound(cues_out, ht, hook_len, lib, fid, cap=cap)
+                    hook_notes += notes
+                for cu in cues_out:                 # sounds added by code get their effect from your list too
+                    g = soundlib.guide(rcfg, lib).get(cu["sfx"]) if cu.get("auto") else None
+                    if g:
+                        cu["fx"] = list(soundlib.EFFECT_FX.get(g.get("effect") or "", []))
+                        cu.setdefault("dur", float(soundlib.load(lib)[cu["sfx"]].get("duration") or 1.0))
+            fx_events = [(cu["t"], cu["fx"], cu.get("dur") or 1.0) for cu in cues_out if cu.get("fx")]
+            if frz:                                 # zoom on the item during the pause
+                t_out = to_out(frz[0])
+                if t_out is not None:
+                    fx_events.append((t_out, ["zoom_hold"], frz[1]))
         elif rcfg.get("sound_effects", True):
             allowed = [t.lower() for t in rcfg.get("sfx_types", ["sus"])]
             for e in (d.get("sfx") or [])[:1]:
@@ -487,7 +551,8 @@ class Pipeline:
         files, raw_offset = editor.render(c.rec_path, clip_abs, out_dur, folder, ass, layout, facecam,
                                           focus_x, sfx_list, rcfg, rcfg.get("raw_padding", 60),
                                           segments=seg_rel, title_png=title_png, mixed_audio=mixed,
-                                          fx_events=fx_events, hook_zoom=hook_on, speeds=piece_speeds)
+                                          fx_events=fx_events, hook_zoom=hook_on, speeds=piece_speeds,
+                                          cam_only_until=hook_len if layout == "reel" else 0.0)
         censored, censor_regs = None, None
         if blur:                                    # nudity: find it in the finished clip, then render again pixelated
             ranges = censor.map_ranges(d.get("nudity_at"), to_out)
@@ -504,7 +569,8 @@ class Pipeline:
             files, _ = editor.render(c.rec_path, clip_abs, out_dur, folder, ass, layout, facecam, focus_x, sfx_list,
                                      dict(rcfg, censor_regions=regs, save_raw=False), rcfg.get("raw_padding", 60),
                                      segments=seg_rel, title_png=title_png, mixed_audio=mixed, fx_events=fx_events,
-                                     hook_zoom=hook_on, speeds=piece_speeds)
+                                     hook_zoom=hook_on, speeds=piece_speeds,
+                                     cam_only_until=hook_len if layout == "reel" else 0.0)
             censored = dict(info, spots=len(regs))
             censor_regs = regs
             log(f"nudity pixelated: {len(regs)} spot(s) (detector {info.get('detector_spots', 0)}, "
