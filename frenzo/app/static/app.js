@@ -985,10 +985,48 @@ function renderPastSelects() {
   const sel = $("#pastStreamer"), cur = sel.value;
   sel.innerHTML = S.streamers.map((s) => `<option value="${esc(s.key)}" ${s.key === cur ? "selected" : ""}>${esc(s.name)} · ${esc(s.platform)}</option>`).join("")
     || `<option value="">Add streamers in Live clipping first</option>`;
+  const hv = $("#hvStreamer"), hcur = hv.value;
+  hv.innerHTML = S.streamers.filter((s) => s.platform === "twitch").map((s) => `<option value="${esc(s.name)}" ${s.name === hcur ? "selected" : ""}>${esc(s.name)}</option>`).join("")
+    || `<option value="">Add Twitch streamers in Live clipping first</option>`;
   const ns = $("#pastName"), ncur = ns.value;
   ns.innerHTML = S.streamers.map((s) => `<option value="${esc(s.name)}" ${s.name === ncur ? "selected" : ""}>${esc(s.name)}</option>`).join("")
     + `<option value="__other" ${ncur === "__other" ? "selected" : ""}>Other…</option>`;
 }
+/* harvest viewer clips */
+const HV = { list: [], sel: new Set() };
+function hvBody() { return { streamer: $("#hvStreamer").value, range: $("#hvRange").value, top: +$("#hvTop").value || 10, min_clippers: +$("#hvMin").value || 2 }; }
+$("#hvFind").onclick = async () => {
+  if (!$("#hvStreamer").value) return;
+  const box = $("#hvList");
+  box.innerHTML = `<div class="empty"><span class="spinner"></span>&nbsp; Looking at the viewer clips…</div>`;
+  $("#hvFind").disabled = true;
+  try {
+    const r = await api("/api/harvest/preview", { method: "POST", body: hvBody() });
+    HV.list = r.moments || []; HV.sel = new Set(HV.list.map((m) => m.key));
+    const st = r.stats || {};
+    $("#hvInfo").textContent = `${st.clips_found || 0} clips found · ${st.moments || 0} moments · ${st.skipped_already_clipped || 0} already clipped by Frenzo · ${st.below_minimums || 0} under the minimums`;
+    renderHv();
+  } catch (err) { box.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+  $("#hvFind").disabled = false;
+};
+function renderHv() {
+  const box = $("#hvList");
+  box.innerHTML = HV.list.length ? HV.list.map((m, i) => `<label class="vod"><input type="checkbox" data-hv="${esc(m.key)}" ${HV.sel.has(m.key) ? "checked" : ""}>
+      <div style="min-width:0"><div class="vod-t">${i + 1}. ${esc((m.titles || [])[0] || "(untitled clip)")}</div>
+        <div class="vod-m"><span class="y">${m.clippers} clipper${m.clippers > 1 ? "s" : ""}</span><span>${m.views} views</span>
+          ${m.featured ? `<span class="badge g">featured</span>` : ""}<span>${m.timeline === "vod" ? "VOD " + hms(m.span[0]) : "no VOD position"}</span>
+          ${(m.titles || []).slice(1, 3).map((t) => `<span class="muted">${esc(t.slice(0, 40))}</span>`).join("")}</div></div></label>`).join("")
+    : `<div class="empty small">No viewer-clip moments left to harvest in this range.</div>`;
+  $("#hvGo").disabled = !HV.sel.size;
+}
+$("#hvList").addEventListener("change", (e) => { const c = e.target.closest("[data-hv]"); if (!c) return; c.checked ? HV.sel.add(c.dataset.hv) : HV.sel.delete(c.dataset.hv); $("#hvGo").disabled = !HV.sel.size; });
+$("#hvGo").onclick = async () => {
+  try {
+    await api("/api/harvest/start", { method: "POST", body: Object.assign(hvBody(), { only: [...HV.sel] }) });
+    toast(`<b>Harvesting ${HV.sel.size} moment${HV.sel.size > 1 ? "s" : ""}</b> · the clips appear in Clips`);
+  } catch (err) { toast(esc(err.message), true); }
+};
+
 $("#pastName").onchange = () => $("#pastNameOther").classList.toggle("hidden", $("#pastName").value !== "__other");
 
 $("#pastSearch").onclick = async () => {

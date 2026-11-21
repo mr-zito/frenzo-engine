@@ -121,6 +121,20 @@ def main():
     ct.add_argument("--as-is", action="store_true", help="no Claude at all: your range as it is (needs --title)")
     ct.add_argument("--title")
     ct.add_argument("--streamer", help="whose settings to use (default: the stream's streamer)")
+    hv = sub.add_parser("harvest", help="edit a streamer's best viewer Twitch clips Frenzo hasn't made yet")
+    hv.add_argument("streamer")
+    g = hv.add_mutually_exclusive_group()
+    g.add_argument("--since", help="look back this far, e.g. 24h (default), 90m, 2d")
+    g.add_argument("--last-stream", action="store_true", help="the streamer's last broadcast")
+    g.add_argument("--from", dest="t_from", help="start date/time, e.g. 2026-11-21T10:00")
+    hv.add_argument("--to", dest="t_to", help="end date/time (with --from)")
+    hv.add_argument("--top", type=int, help="how many moments (default 10)")
+    hv.add_argument("--min-clippers", type=int, help="at least this many different clippers (default 2)")
+    hv.add_argument("--min-views", type=int, help="at least this many views")
+    hv.add_argument("--only", help="(app) comma-separated moment keys to make")
+    hv.add_argument("--list", action="store_true", help="only list the ranked moments, make nothing")
+    hv.add_argument("--json", action="store_true", help="(app) print the listing as JSON")
+    hv.add_argument("--report", help="(tests) write harvest_report.json here; clips go to <report>/clips")
     ln = sub.add_parser("learn", help="learn from your hand-made, deleted, retitled and re-timed clips")
     ln.add_argument("--measure", help="(internal) measure a clip you cut by hand and save it as an example")
     ln.add_argument("--dry-run", action="store_true", help="ask Claude and show the result, save nothing")
@@ -198,6 +212,24 @@ def main():
                       mode="manual" if args.as_is else "claude", title=args.title, streamer=args.streamer)
         from .util import log
         log(f"{len(folders)} of {len(ranges)} cut(s) made", "cut")
+        return
+    if args.cmd == "harvest":
+        from .harvest import harvest
+        cfg = load_config(args.config)
+        report = {} if (args.report or args.json) else None
+        if args.report:
+            cfg["storage"]["output_dir"] = os.path.join(os.path.abspath(args.report), "clips")
+        harvest(cfg, args.streamer, since=args.since, last_stream=args.last_stream, t_from=args.t_from, t_to=args.t_to,
+                top=args.top, min_clippers=args.min_clippers, min_views=args.min_views,
+                only=[k for k in (args.only or "").split(",") if k], report=report, dry_run=args.list or args.json)
+        if args.json:
+            import json as _json
+            print("HARVEST_JSON " + _json.dumps(report, ensure_ascii=False))
+        if args.report:
+            import json as _json
+            os.makedirs(args.report, exist_ok=True)
+            with open(os.path.join(args.report, "harvest_report.json"), "w", encoding="utf-8") as f:
+                _json.dump(report, f, ensure_ascii=False, indent=1, default=str)
         return
     if args.cmd == "learn":
         from .learning import main as learn_main

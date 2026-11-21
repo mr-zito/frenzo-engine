@@ -193,27 +193,24 @@ class TwitchPublic:
         return self._games[name]
 
     def _clips(self, broadcaster_id, since_ts, until_ts=None, max_pages=20):
-        """Clips made in [since_ts, until_ts]. The public API only lists them MOST VIEWED first (newest-first is
-        refused), so pages are read and filtered by time: the best clips come first, which is what we want."""
+        """Clips made in [since_ts, until_ts]. LIMITS of the keyless API: clips are only listed MOST VIEWED first
+        (newest-first is refused) and only the first page of 100 is served (later pages need a browser integrity
+        token). So the top 100 of each period that covers the range (day, week, month) are combined and filtered
+        by time: the most-viewed clips are found, little-watched fresh ones may not be (official keys see all)."""
         age = time.time() - since_ts
-        period = "LAST_DAY" if age < 23 * 3600 else "LAST_WEEK" if age < 6.9 * 86400 else \
-            "LAST_MONTH" if age < 29 * 86400 else "ALL_TIME"
-        q = ("query($id:ID!,$after:Cursor,$p:ClipsPeriod){ user(id:$id){ clips(first:100, after:$after, criteria:"
-             "{period:$p, sort:VIEWS_DESC}){ edges { cursor node { " + self.CLIP_FIELDS + " } } "
-             "pageInfo { hasNextPage } } } }")
-        out, after = [], None
-        for _ in range(max_pages):
-            data = self._q(q, {"id": str(broadcaster_id), "after": after, "p": period}).get("user") or {}
-            clips = data.get("clips") or {}
-            edges = clips.get("edges") or []
-            for e in edges:
+        periods = ["LAST_DAY", "LAST_WEEK", "LAST_MONTH", "ALL_TIME"]
+        first = 0 if age < 23 * 3600 else 1 if age < 6.9 * 86400 else 2 if age < 29 * 86400 else 3
+        q = ("query($id:ID!,$p:ClipsPeriod){ user(id:$id){ clips(first:100, criteria:"
+             "{period:$p, sort:VIEWS_DESC}){ edges { node { " + self.CLIP_FIELDS + " } } } } }")
+        out, seen = [], set()
+        for period in periods[first:first + 2]:
+            data = self._q(q, {"id": str(broadcaster_id), "p": period}).get("user") or {}
+            for e in ((data.get("clips") or {}).get("edges")) or []:
                 c = self._helix(e["node"], broadcaster_id)
                 ts = self._ts(c["created_at"])
-                if ts >= since_ts and (until_ts is None or ts <= until_ts) and all(x["id"] != c["id"] for x in out):
+                if ts >= since_ts and (until_ts is None or ts <= until_ts) and c["id"] not in seen:
+                    seen.add(c["id"])
                     out.append(c)
-            after = edges[-1].get("cursor") if edges else None
-            if not after or not (clips.get("pageInfo") or {}).get("hasNextPage"):
-                break
         return out
 
     def clips_since(self, broadcaster_id, started_at_iso, max_pages=8):

@@ -103,6 +103,23 @@
           <div id="pastList" class="vod-list"><div class="empty">Pick a streamer and search.</div></div>
         </div>
         <div class="card">
+          <div class="card-head"><h2>Harvest viewer clips</h2><span class="muted small">Twitch clips viewers made that Frenzo hasn't clipped yet</span></div>
+          <div class="row">
+            <select id="hvStreamer"></select>
+            <select id="hvRange">
+              <option value="last">Last stream</option>
+              <option value="24h" selected>Last 24 hours</option>
+              <option value="3d">Last 3 days</option>
+              <option value="7d">Last week</option>
+            </select>
+            <label class="fld" title="moments to make">Top<input id="hvTop" type="number" min="1" max="30" value="10" style="width:64px"></label>
+            <label class="fld" title="at least this many different viewers clipped it">Min clippers<input id="hvMin" type="number" min="1" max="10" value="2" style="width:64px"></label>
+            <button id="hvFind" class="primary">Find</button>
+          </div>
+          <div id="hvList" class="vod-list"><div class="empty small">Find ranks the viewer clips by how many people clipped them, featured status and views. Untick any you don't want, then start.</div></div>
+          <div class="row"><span class="muted small" id="hvInfo"></span><span class="grow"></span><button id="hvGo" class="primary" disabled>Harvest selected</button></div>
+        </div>
+        <div class="card">
           <div class="card-head"><h2>Or paste links</h2></div>
           <textarea id="pastLinks" rows="4" placeholder="One past-stream or video link per line&#10;https://www.twitch.tv/videos/2345678901&#10;https://kick.com/gattouz0/videos/...&#10;https://www.youtube.com/watch?v=..."></textarea>
           <div class="row">

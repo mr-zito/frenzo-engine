@@ -559,6 +559,8 @@ class Pipeline:
                         f"{raw_offset:.1f}s in raw.mp4",
             "created": now.isoformat(timespec="seconds"),
             "seconds_flag_to_clip": round(time.time() - c.flagged_wall, 1) if c.flagged_wall and not redo else None,
+            # live clips: where the clip starts in real time (harvest uses it to skip moments already clipped)
+            "start_wall": round(c.t0 + win_start + start, 2) if isinstance(c.t0, (int, float)) and c.t0 > 1e9 else None,
             "posted": {"tiktok": False, "youtube": False, "instagram": False, "x": False},
         }
         if redo:

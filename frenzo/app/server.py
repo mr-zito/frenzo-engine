@@ -175,7 +175,7 @@ class Job:
                 "target": self.target, "last": self.last}
 
 
-LONG_KINDS = ("past",)      # hours-long jobs: they get their own lane so your edits never wait behind them
+LONG_KINDS = ("past", "harvest")      # hours-long jobs: they get their own lane so your edits never wait behind them
 
 
 class Jobs:
@@ -1259,6 +1259,67 @@ def create_app(cfg_path):
             args.append("--any-game")
         job = jobs.add("past", f"Past streams: {len(urls)} for {name}", args)
         return jsonify({"ok": True, "job": job.id})
+
+    # ---- harvest viewer clips (frenzo/harvest.py) ----
+    def _harvest_args(body):
+        login = re.sub(r"[^a-z0-9_]", "", str(body.get("streamer") or "").lower())
+        if not login:
+            raise ValueError("Pick a streamer")
+        rng = str(body.get("range") or "24h")
+        args = ["harvest", login] + (["--last-stream"] if rng == "last" else ["--since", re.sub(r"[^0-9hdm]", "", rng) or "24h"])
+        args += ["--top", str(max(1, min(30, int(body.get("top") or 10)))),
+                 "--min-clippers", str(max(1, min(10, int(body.get("min_clippers") or 2))))]
+        return login, args
+
+    @app.post("/api/harvest/preview")
+    def harvest_preview():
+        try:
+            login, args = _harvest_args(request.get_json(force=True))
+        except (ValueError, TypeError) as e:
+            return err(str(e))
+        res = subprocess.run([_python(), "-m", "frenzo", "--config", cfg_path] + args + ["--json"],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+                             cwd=str(ROOT), creationflags=NO_WINDOW)
+        line = next((l for l in res.stdout.splitlines() if l.startswith("HARVEST_JSON ")), None)
+        if not line:
+            last = (res.stdout + res.stderr).strip().splitlines()[-1:] or ["no answer"]
+            return err("Couldn't list the viewer clips: " + last[0][-200:])
+        return jsonify(json.loads(line[len("HARVEST_JSON "):]) or {})
+
+    @app.post("/api/harvest/start")
+    def harvest_start():
+        body = request.get_json(force=True)
+        try:
+            login, args = _harvest_args(body)
+        except (ValueError, TypeError) as e:
+            return err(str(e))
+        only = [re.sub(r"[^A-Za-z0-9_-]", "", str(k)) for k in body.get("only") or []]
+        if only:
+            args += ["--only", ",".join(k for k in only if k)]
+        job = jobs.add("harvest", f"Harvest: {len(only) or 'top'} viewer-clip moment(s) of {login}", args)
+        return jsonify({"ok": True, "job": job.id})
+
+    def harvest_scheduler():
+        """Optional: harvest each streamer every N minutes (harvest.schedule_minutes, or a streamer's own
+        harvest_every_minutes). Off by default (0)."""
+        last = {}
+        while True:
+            time.sleep(60)
+            try:
+                c = state["cfg"]
+                if not (c.get("harvest") or {}).get("enabled", True):
+                    continue
+                for s in c.get("streamers") or []:
+                    every = float(s.get("harvest_every_minutes") or (c.get("harvest") or {}).get("schedule_minutes") or 0)
+                    if every <= 0 or s.get("platform") != "twitch":
+                        continue
+                    if time.time() - last.get(s["login"], 0) >= every * 60:
+                        last[s["login"]] = time.time()
+                        jobs.add("harvest", f"Harvest (scheduled): {s['login']}",
+                                 ["harvest", s["login"], "--since", f"{max(1, int(every * 2))}m"])
+            except Exception:
+                pass
+    threading.Thread(target=harvest_scheduler, daemon=True).start()
 
     # ---- clips ----
     @app.get("/api/clips")

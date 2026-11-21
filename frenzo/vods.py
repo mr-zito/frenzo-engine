@@ -381,6 +381,16 @@ def clip_past_stream(cfg, scfg, vod, pipeline, top, report=None):
                 c.chat, c.t0 = chat, start
             c.priority = m["score"]
             pipeline.process(c)
+            if c.folder:                             # where the clip sits in the past stream (harvest skips it)
+                try:
+                    mp = os.path.join(c.folder, "meta.json")
+                    with open(mp, "r", encoding="utf-8") as f:
+                        cm = json.load(f)
+                    cm.update({"vod_url": vod["url"], "vod_start": round(start + float(cm.get("start_in_recording") or 0), 2)})
+                    with open(mp, "w", encoding="utf-8") as f:
+                        json.dump(cm, f, ensure_ascii=False, indent=2)
+                except (OSError, ValueError):
+                    pass
             if c.folder:
                 if group == "main":
                     saved += 1
