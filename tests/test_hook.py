@@ -86,7 +86,7 @@ class Hook(unittest.TestCase):
         def fix(s, lib):
             return s if s in lib_ids else None
         cues, notes = hook.ensure_opening_sound([{"t": 5.0, "sfx": "x"}], "cold_open", 1.4, None, fix)
-        self.assertEqual([c["t"] for c in cues], [0.15, 1.4, 5.0])
+        self.assertEqual([c["t"] for c in cues], [0.5, 1.4, 5.0])
         self.assertEqual(cues[1]["sfx"], "record-scratch")
         self.assertEqual(len(notes), 2)
         cues, notes = hook.ensure_opening_sound([{"t": 0.3, "sfx": "x"}], "quote", 0, None, fix)

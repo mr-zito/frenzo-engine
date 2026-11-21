@@ -133,7 +133,9 @@ def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None):
     if not any(c["t"] < 1.0 for c in cues):
         sid = next((fix_id(s, lib) for s in OPEN_SFX if fix_id(s, lib)), None)
         if sid:
-            cues.append({"t": 0.15, "sfx": sid, "role": "support", "align": "peak" if "boom" in sid else "start",
-                         "gain_db": -4.0, "stop": 0.0, "duck": False, "kind": "hit", "max_len": 1.5, "fx": [], "auto": True})
-            notes.append(f"added {sid} at 0.15s (a sound must land in the first second)")
+            # whooshes and booms land by their peak (the sound kit's rule); 0.5 s leaves room for the lead-in
+            cues.append({"t": 0.5, "sfx": sid, "role": "support", "align": "peak", "gain_db": -4.0, "stop": 0.0,
+                         "duck": False, "kind": "whoosh" if "whoosh" in sid else "hit", "max_len": 1.5, "fx": [],
+                         "auto": True})
+            notes.append(f"added {sid} at 0.5s (a sound must land in the first second)")
     return sorted(cues, key=lambda c: c["t"]), notes
