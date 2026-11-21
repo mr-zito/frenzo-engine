@@ -199,7 +199,7 @@ def _merge_moments(found, gap=60):
 
 
 def _report_row(report, vod, m, c, stage_s):
-    if not report:
+    if report is None:                      # (an empty list is a report with no rows yet)
         return
     d = c.judged or {}
     report.append({"stream": vod["id"], "time": f"{int(m['sec'] // 3600)}:{int(m['sec'] % 3600 // 60):02d}:{int(m['sec'] % 60):02d}",
