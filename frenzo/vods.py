@@ -142,36 +142,13 @@ def _find(cwd, stem):
     return None
 
 
-def _envelope(audio, rate=8000, bin_s=0.1):
-    step = int(rate * bin_s)
-    n = len(audio) // step
-    if n == 0:
-        return np.zeros(0, dtype=np.float32)
-    a = audio[: n * step].reshape(n, step)
-    return (20 * np.log10(np.sqrt((a ** 2).mean(axis=1)) + 1e-9)).astype(np.float32)
-
-
 def _seg_start(audio_path, seg_path, expected, search=480):
     """Where the downloaded video piece really starts in the stream, in seconds.
 
     Some platforms (Kick) cut --download-sections minutes away from the asked time, so the piece is matched
     against the full audio by its loudness pattern. Returns None if no confident match is found."""
-    try:
-        seg = _envelope(extract_audio(seg_path, 0, 600, rate=8000))
-        lo = max(0.0, expected - search)
-        full = _envelope(extract_audio(audio_path, lo, 2 * search + len(seg) / 10, rate=8000))
-    except Exception:
-        return None
-    if len(seg) < 200 or len(full) <= len(seg):
-        return None
-    s = (seg - seg.mean()) / (seg.std() + 1e-6)
-    win = np.lib.stride_tricks.sliding_window_view(full, len(seg))
-    w = (win - win.mean(axis=1, keepdims=True)) / (win.std(axis=1, keepdims=True) + 1e-6)
-    corr = w @ s / len(s)
-    i = int(np.argmax(corr))
-    if corr[i] < 0.6:
-        return None
-    return lo + i / 10
+    from .crowd import locate
+    return locate(seg_path, audio_path, expected, search)
 
 
 def _keep_alive(work, every=600):

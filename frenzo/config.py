@@ -33,6 +33,39 @@ DEFAULTS = {
         "voice_sensitivity": "normal",
         "loudness_triggers": "off",
         "loudness_jump_db": 12,
+        # --- viewer clips as evidence (needs Twitch keys) ---
+        "clip_evidence": True,          # off = the old behaviour (a clip is just one more signal)
+        "clip_open_minutes": 5,         # a moment stays open this long for viewer clips to land on it
+        "clip_poll_fast_seconds": 25,   # poll a streamer's clips this often for a while after any signal
+        "clip_fast_minutes": 5,
+        "clip_lookback_minutes": 10,    # each poll asks for clips made in the last N minutes
+        "clip_delay_seconds": 6,        # a live clip ends about this long before it was created
+        "clip_align": True,             # download each clip and match its sound against our recording
+        "clip_lead_in": 25,             # seconds kept before a viewer clip's span (the setup)
+        "clip_tail": 8,
+        "clip_keep_bonus": 1,           # strong clip evidence lowers that moment's keep threshold by this
+        "clip_strong_clippers": 3,
+        "clip_strong_views": 1000,
+        "clip_fast_views_per_min": 30,  # a clip gaining views this fast moves its moment to the front
+        "clip_bots": ["streamelements", "nightbot", "moobot", "fossabot", "streamlabs", "wizebot", "sery_bot",
+                      "soundalerts", "botrixoficial", "kofistreambot"],
+        "clip_lessons": True,           # strong viewer clips become "missed" / "confirmed" lessons
+        # --- picking moments ---
+        "learned_chat_delay": True,     # per-streamer chat delay measured from chat vs voice reactions
+        "chat_delay_seconds": 6,        # fallback chat delay
+        "chat_floor": "scaled",         # scaled (by the chat's own speed: small streamers can trigger) / fixed
+    },
+    "queue": {
+        "best_first": True,             # edit the best waiting moment first (combined score), not the oldest
+        "cap_keeps_best": True,         # hourly cap: a stronger moment replaces a weaker waiting one
+    },
+    "past": {
+        "crowd_signals": True,          # viewer clips, chat replay and YouTube "Most replayed" before the detectors
+        "chat_replay": True,
+        "heatmap": True,
+        "keep_preview_hours": 48,       # keep each past stream's preview so you can cut it by hand (0 = delete)
+        "piece_lead": 30,               # harvest: seconds downloaded before a viewer clip
+        "piece_tail": 10,
     },
     "clips": {
         "min_score": 6,
@@ -77,6 +110,17 @@ DEFAULTS = {
         "encoder": "auto",     # auto = NVIDIA GPU (NVENC) when it works, else CPU / gpu / cpu
         "preset": "slow",
         "save_raw": True,
+        # --- sound design with the GTA SFX library ---
+        "sound_library": True,          # off = the old single "sus" sound
+        "sound_library_path": "",       # empty = the installed gta-reel-sound-studio skill's gta_sfx_library
+        "sound_check": True,            # run check_reel.py on every clip, auto-fix once
+        "sound_safe_mode": True,        # no sounds tagged music / explicit unless the campaign allows them
+        "sound_no_repeat": 15,          # avoid sounds used in the last N clips of the account
+        "punch_fx": True,               # punch-in / shake / flash on the gameplay band at Claude's cue times
+        # --- hook, captions, titles ---
+        "hook": True,                   # hook rules for the first 3 seconds
+        "caption_style": "bold",        # bold (1-3 words ALL CAPS on the seam, karaoke pop) / mini (old)
+        "five_titles": True,
     },
     "storage": {
         "output_dir": "clips",
@@ -87,6 +131,13 @@ DEFAULTS = {
         "quality": "1080p60,1080p,936p60,720p60,best",
     },
     "workers": 1,
+    "harvest": {
+        "enabled": True,
+        "top": 10,
+        "min_clippers": 2,
+        "min_views": 0,
+        "schedule_minutes": 0,          # 0 = off; otherwise harvest each streamer this often
+    },
     "learning": {
         "auto": True,          # learn automatically after 5+ new examples (at most every 2 hours)
         "model": "sonnet",     # model for learning runs (falls back to claude_code_model)

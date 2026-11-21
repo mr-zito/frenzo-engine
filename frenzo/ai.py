@@ -300,7 +300,7 @@ class ClipJudge:
             "CHAT:\n" + ("\n".join(chat) or "(no chat data)") + "\n\n"
             f"LOUDNESS (dBFS, every 2 s): {loud}\n\n"
             f"Hashtags to always include: {' '.join(ctx['tags']) or '(none)'}"
-            + campaign_rules(ctx)
+            + ctx.get("crowd", "") + ctx.get("score_line", "") + campaign_rules(ctx)
         )
 
     def _decide_claude_code(self, ctx):
@@ -389,7 +389,7 @@ class ClipJudge:
             "CHAT:\n" + ("\n".join(chat) or "(no chat data)") + "\n\n"
             f"LOUDNESS (dBFS, every 2 s): {loud}\n\n"
             f"Hashtags to always include: {' '.join(ctx['tags']) or '(none)'}"
-            + campaign_rules(ctx)
+            + ctx.get("crowd", "") + ctx.get("score_line", "") + campaign_rules(ctx)
         )})
         try:
             msg = self.client.messages.create(

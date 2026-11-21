@@ -9,9 +9,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import analyzer, campaign, censor, editor
+from . import analyzer, campaign, censor, crowd, editor
 from . import layout as layout_mod
-from . import titlecard, viral
+from . import scoring, titlecard, viral
 from . import sfx as sfx_mod
 from .learning import clip_value, min_score_for
 from .util import log, slugify
@@ -46,6 +46,17 @@ class Candidate:
     fallback: Optional[dict] = None    # decision to use if Claude can't answer
     user_context: str = ""             # what happens, written by you
     learn_log: Optional[tuple] = None  # (decision, note, window start) for the learning decision log
+    # crowd evidence (viewer clips, heatmap, chat replay) and the editing queue
+    clips: list = field(default_factory=list)   # crowd.ViewerClip objects that landed on this moment
+    clip_span: Optional[tuple] = None  # (a, b) seconds in the recording the viewer clips cover: the window's core
+    priority: float = 0.0              # combined score: the editing queue takes the best moment first
+    keep_bonus: int = 0                # strong crowd evidence lowers the keep threshold by this much
+    evidence: str = ""                 # extra crowd lines for Claude (heatmap peak, chat replay...)
+    signals: dict = field(default_factory=dict)  # signal name -> strength (z-score like), for the combined score
+    flagged_wall: float = 0.0          # wall time it was flagged (speed log)
+    judged: Optional[dict] = None      # Claude's answer, once judged
+    folder: Optional[str] = None       # the finished clip, once saved
+    done: bool = False
 
 
 def _nudity_raw(d, win_start, clip_abs, raw_offset, redo):
@@ -83,6 +94,7 @@ class Pipeline:
         folder = None
         try:
             folder = self._process(c)
+            c.folder = folder
             return folder
         except Exception as e:
             log(f"moment at {c.anchor:.0f}s failed: {e}", c.login)
@@ -93,6 +105,7 @@ class Pipeline:
                 from .learning import log_decision
                 d, note, win_start = c.learn_log
                 log_decision(self.cfg, c, d, bool(folder), win_start, note)
+            c.done = True
             if c.on_done:
                 c.on_done()
 
@@ -117,6 +130,11 @@ class Pipeline:
 
         before = c.context_before if c.context_before is not None else ccfg["context_before"]
         after = c.context_after if c.context_after is not None else ccfg["context_after"]
+        if c.clip_span and c.context_before is None:
+            # viewer clips: their span is the core of the window, plus a lead-in for the setup
+            det = self.cfg["detection"]
+            before = max(10.0, c.anchor - (c.clip_span[0] - float(det.get("clip_lead_in", 25))))
+            after = max(5.0, c.clip_span[1] + float(det.get("clip_tail", 8)) - c.anchor)
         win_start = max(0.0, c.anchor - before)
         win_dur = c.anchor + after - win_start
         log(f"analysing {win_dur:.0f}s window around {c.anchor:.0f}s ({c.source})", c.login)
@@ -149,9 +167,12 @@ class Pipeline:
             "transcript": analyzer.transcript_lines(words), "chat_lines": chat_lines,
             "loudness": loud, "frames": frames, "tags": c.streamer_cfg.get("tags", []),
             "scfg": c.streamer_cfg,                  # so ai.py can read the streamer's campaign rules
+            "crowd": crowd.prompt_text(c.clips) + (c.evidence or ""),
+            "score_line": scoring.describe(c),
         }
         d = dict(c.forced) if c.forced else self.judge.decide(ctx)
         c.learn_log = (d, None, win_start)
+        c.judged = d
         if c.manual and not c.forced:
             reason = str(d.get("reason", ""))
             if reason.startswith("skipped:"):
@@ -176,8 +197,13 @@ class Pipeline:
             if reason.startswith("backup rule") or "start" not in d or "end" not in d:
                 c.status = "no_claude"
                 return None
-        elif not c.manual and (not d.get("keep") or score < min_score_for(self.cfg, c.streamer_cfg)):
-            return None
+        elif not c.manual:
+            need = min_score_for(self.cfg, c.streamer_cfg) - int(c.keep_bonus or 0)
+            if score < need or not (d.get("keep") or c.keep_bonus):
+                c.status = "rejected"
+                return None
+            if c.keep_bonus and not d.get("keep"):
+                log(f"kept on the viewers' word: {score}/10 with strong clip evidence (threshold {need})", c.login)
         nudity_mode, chosen = censor.mode(self.cfg), c.manual or redo
         blur = bool(d.get("nudity")) and (nudity_mode == "blur" or (chosen and nudity_mode == "skip"))
         if chosen:
@@ -338,6 +364,8 @@ class Pipeline:
             "censor_regions": [list(r) for r in censor_regs] if censor_regs else None,
             "nudity_raw": _nudity_raw(d, win_start, clip_abs, raw_offset, redo),
             "flagged_by": c.source, "language": lang,
+            "viewer_clips": [vc.as_dict() for vc in c.clips] or None,
+            "combined_score": scoring.priority(c) or None, "score_breakdown": scoring.breakdown(c) or None,
             "recording": os.path.basename(c.rec_path),
             "start_in_recording": round(win_start + start, 2), "duration": round(clip_dur, 2),
             "files": {f: (dict((g, h) for g, h in editor.handle_groups(rcfg)).get(f[5:-4], "no handle"))

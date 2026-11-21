@@ -132,6 +132,15 @@ class TwitchPlatform:
             out.append((c["id"], created, c.get("title", "")))
         return out
 
+    def clips_raw(self, info, since_iso):
+        """Get Clips items (dicts) made since since_iso: the viewer-clip evidence (needs Twitch keys)."""
+        if self.keyless or not info.user_id:
+            return []
+        return self.api.clips_since(info.user_id, since_iso)
+
+    def clips_by_ids(self, ids):
+        return [] if self.keyless else self.api.clips_by_ids(ids)
+
 
 class KickPlatform:
     name = "kick"

@@ -484,7 +484,7 @@ def build_summary(cfg, exs, decs, learned, max_chars=14000):
 
     missed = by_type.get("missed", [])
     if missed:
-        lines.append("\n== MISSED moments (the owner cut them by hand from a recording) ==")
+        lines.append("\n== MISSED moments (the owner cut them by hand, or viewers clipped them) ==")
         per = {}
         for e in missed:
             per.setdefault(e.get("login") or "?", []).append(e)
@@ -514,6 +514,33 @@ def build_summary(cfg, exs, decs, learned, max_chars=14000):
         for e in missed[-18:]:
             lines.append(f"  * [{e.get('login')}] {str(e.get('title') or '')[:70]} | {str(e.get('context') or '')[:110]}"
                          f" | \"{str(e.get('transcript') or '')[:150]}\" | {str(e.get('verdict') or '')[:90]}")
+
+    crowd_missed = [e for e in missed if e.get("source") == "viewer_clips"]
+    confirmed = by_type.get("confirmed", [])
+    if crowd_missed or confirmed:
+        lines.append("\n== VIEWER CLIPS (Twitch viewers clipped these moments: real people saying it was worth saving) ==")
+        per = {}
+        for e in crowd_missed + confirmed:
+            per.setdefault(e.get("login") or "?", []).append(e)
+        for login, es in sorted(per.items(), key=lambda kv: -len(kv[1])):
+            miss = [e for e in es if e.get("type") == "missed"]
+            conf = [e for e in es if e.get("type") == "confirmed"]
+            never = sum(1 for e in miss if str(e.get("verdict", "")).startswith("never"))
+            low = [e.get("engine_score") for e in miss if isinstance(e.get("engine_score"), (int, float))]
+            sig = {}
+            for e in conf:
+                for fam in ("chat spike", "chat thinks", "chat says", "chat reacting", "streamer reaction",
+                            "gameplay chaos", "hot take"):
+                    if fam in str(e.get("flagged_by") or ""):
+                        sig[fam] = sig.get(fam, 0) + 1
+            lines.append(f"- {login}: {len(conf)} Frenzo clips CONFIRMED by viewers, {len(miss)} strong viewer moments "
+                         f"Frenzo did NOT keep ({never} never flagged by any detector, {len(low)} judged with median "
+                         f"score {_med(low)}) | signals behind confirmed picks: "
+                         + (", ".join(f"{k} {n}" for k, n in sig.items()) or "none"))
+        for e in crowd_missed[-10:]:
+            lines.append(f"  * missed [{e.get('login')}] {e.get('clippers')} clippers, {e.get('views')} views, viewers "
+                         f"titled it {(e.get('viewer_titles') or ['-'])[:2]} | "
+                         f"{str(e.get('verdict') or '')[:60]} | {str(e.get('engine_reason') or '')[:90]}")
 
     dels = by_type.get("deleted", [])
     if dels:
@@ -586,7 +613,9 @@ chaos measured as picture motion vs normal, hot takes heard in speech) and a cli
 The page owner teaches it: MISSED moments are clips they cut by hand from recordings (with the signals measured at \
 that moment and whether the engine flagged it); BAD PICKS are engine clips they deleted; TITLE FIXES and TIMING \
 FIXES show how they want titles and margins. RE-EDITS are clips the owner sent back to Claude with a note (what was \
-wrong / what they want): repeated notes are the clearest editor_notes and title_notes.
+wrong / what they want): repeated notes are the clearest editor_notes and title_notes. VIEWER CLIPS lessons come \
+from Twitch viewers: a strong viewer clip Frenzo didn't keep is a missed moment; a Frenzo clip viewers also clipped \
+is a CONFIRMED pick (the signals behind confirmed picks work: don't raise those thresholds).
 
 RULES:
 - Only change something when SEVERAL examples point the same way. Never change anything because of one example.
@@ -735,7 +764,7 @@ def overview(cfg):
     exs = examples(cfg)
     learned = load_learned(cfg)
     st = state(cfg)
-    counts = {k: 0 for k in ("missed", "deleted", "retitled", "timing", "reedited")}
+    counts = {k: 0 for k in ("missed", "deleted", "retitled", "timing", "reedited", "confirmed")}
     for e in exs:
         if e.get("type") in counts:
             counts[e["type"]] += 1

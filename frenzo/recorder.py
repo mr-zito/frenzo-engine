@@ -181,6 +181,15 @@ class Recorder:
     def part_paths(self):
         return [p.path for p in self.all_parts()]
 
+    def part_for(self, wall_a, wall_b):
+        """A part that recorded the whole wall-time span [a, b] (the engine's current part first), or None."""
+        now = time.time()
+        parts = [self.active] + [p for p in self.retiring + self.done[::-1] + [self.next] if p and p is not self.active]
+        for p in parts:
+            if p and p.t0 and p.t0 <= wall_a and (p.ended or now) >= wall_b:
+                return p
+        return None
+
     def _on_first_bytes(self, part):
         with self.lock:
             if part is self.active and self.t0 is None:
