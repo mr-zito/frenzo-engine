@@ -46,7 +46,7 @@ def cut_game_audio(rec, start, segments, out_wav, speeds=None):
     """The game audio of the clip with its jump cuts: segments are (a, b) seconds relative to `start`.
     speeds: optional speed per segment (0.5 = slow motion)."""
     segments = [(float(a), float(b)) for a, b in segments]
-    span = segments[-1][1]
+    span = max(b for _, b in segments)
     k = len(segments)
     g = f"[0:a]aresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asplit={k}" + \
         "".join(f"[as{i}]" for i in range(k))
@@ -120,13 +120,32 @@ def mix(game_wav, rows, out_wav, total, duck_db=-9.0, lufs=-14.0, game_volume=1.
     ln2 = (f"{ln}:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
            f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true,aresample=48000,"
            f"alimiter=limit=0.75:level=0:attack=1:release=40")       # true peak stays under -1 dBFS after AAC
-    run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", tmp, "-af", ln2, "-c:a", "pcm_s16le", out_wav])
+    run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", tmp, "-af", ln2, "-c:a", "pcm_s24le", out_wav])
+    # peaky mixes (a metal pipe on a quiet scene): the limiter pulls the loudness under the target; measure again
+    # and correct (gain + the same limiter), at most twice
+    for _ in range(2):
+        got = measure_lufs(out_wav)
+        if got is None or abs(got - lufs) <= 0.5:
+            break
+        fixed = out_wav + ".fix.wav"
+        run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", out_wav, "-af",
+             f"volume={lufs - got:.2f}dB,alimiter=limit=0.75:level=0:attack=1:release=40", "-c:a", "pcm_s24le", fixed])
+        os.replace(fixed, out_wav)
     for p in (tmp, gfile):
         try:
             os.remove(p)
         except OSError:
             pass
     return out_wav
+
+
+def measure_lufs(path):
+    """Integrated loudness (LUFS) of a sound file."""
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", path, "-af", "ebur128", "-f", "null", "-"],
+                       capture_output=True, text=True, creationflags=NO_WINDOW if os.name == "nt" else 0).stderr
+    import re
+    m = re.search(r"I:\s+(-?[\d.]+) LUFS", r[r.rfind("Summary:"):])
+    return float(m.group(1)) if m else None
 
 
 def write_cues_json(clip_path, rows, total, fps=30):

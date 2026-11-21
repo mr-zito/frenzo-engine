@@ -11,7 +11,8 @@ from typing import Optional
 
 from . import analyzer, campaign, censor, crowd, editor
 from . import layout as layout_mod
-from . import scoring, titlecard, viral
+from . import hook as hook_mod
+from . import scoring, titlecard, titles, viral
 from . import sfx as sfx_mod
 from .learning import clip_value, min_score_for
 from .util import log, slugify
@@ -324,10 +325,28 @@ class Pipeline:
         segs = viral.clean_segments(d.get("segments"), start, end) if rcfg.get("jump_cuts", True) else [[start, end]]
         if sum(b2 - a2 for a2, b2 in segs) < ccfg["min_length"] * 0.6:   # Claude cut too much: keep the whole span
             segs = [[start, end]]
+        # ---- hook rules (first 3 s) and pacing: Claude chooses, code enforces ----
+        hook_on = bool(rcfg.get("hook", True)) and not c.forced and layout in ("reel", "focus")
+        ht, hp = hook_mod.hook_piece(d, win_dur) if hook_on else (None, None)
+        lead, tail = float(clip_value(self.cfg, "lead_in", 1.5)), float(clip_value(self.cfg, "tail", 2.0))
+        if hook_on:                        # open on the action, end 1-2 s after the reaction (clean loop)
+            lead, tail = min(lead, 0.5), max(1.0, min(tail, 2.0))
         # ---- context margins: a little before the setup and after the reaction, so the clip makes sense ----
-        segs = viral.add_margins(segs, float(clip_value(self.cfg, "lead_in", 1.5)), float(clip_value(self.cfg, "tail", 2.0)),
-                                 0.0, win_dur,
+        segs = viral.add_margins(segs, lead, tail, 0.0, win_dur,
                                  min_setup_before=(rel, float(ccfg.get("min_setup", 4.0))) if c.source else None)
+        hook_notes = []
+        if hook_on:
+            if rcfg.get("trim_dead_air", True):
+                before_n = sum(b2 - a2 for a2, b2 in segs)
+                segs = hook_mod.trim_dead_air(segs, words, loud, protect=rel)
+                cut = before_n - sum(b2 - a2 for a2, b2 in segs)
+                if cut > 0.5:
+                    hook_notes.append(f"cut {cut:.1f}s of dead air")
+            if ht not in ("cold_open", "reaction_first"):
+                a0 = segs[0][0]
+                segs = hook_mod.trim_leading_quiet(segs, loud, protect=rel)
+                if segs[0][0] > a0:
+                    hook_notes.append(f"trimmed {segs[0][0] - a0:.0f}s of quiet at the start")
         if camp and (camp.get("min_seconds") or camp.get("max_seconds")):
             if c.manual and c.forced:              # your own cut "as is": kept exactly as you chose it
                 total = sum(b2 - a2 for a2, b2 in segs)
@@ -335,11 +354,29 @@ class Pipeline:
                     log(f"note: your cut is {total:.0f}s, outside the campaign's length rule", c.login)
             else:                                  # campaign length rule: never shorter than min, never longer than max
                 segs = campaign.fit_segments(segs, 0.0, win_dur, min_len, max_len)
-        start, end = segs[0][0], segs[-1][1]
+        speeds = [1.0] * len(segs)
+        if hook_on and d.get("slowmo"):
+            segs, speeds = hook_mod.apply_slowmo(segs, d.get("slowmo"))
+            if 0.5 in speeds:
+                hook_notes.append("0.5x slow-mo on the payoff")
+        pieces, piece_speeds, hook_len = [list(s) for s in segs], list(speeds), 0.0
+        if hook_on and ht in ("cold_open", "reaction_first") and hp:
+            pieces, piece_speeds = [list(hp)] + pieces, [1.0] + piece_speeds      # the hook piece plays first
+            hook_len = hp[1] - hp[0]
+        start, end = min(p[0] for p in pieces), max(p[1] for p in pieces)
         clip_abs = win_start + start
-        to_out = viral.mapper(segs)
-        out_dur = sum(b2 - a2 for a2, b2 in segs)
-        seg_rel = [(a2 - start, b2 - start) for a2, b2 in segs]
+        to_out = hook_mod.mapper(segs, speeds, offset=hook_len)     # times map onto the main (not the hook) copy
+        out_dur = hook_len + sum((b2 - a2) / sp for (a2, b2), sp in zip(segs, speeds))
+        seg_rel = [(a2 - start, b2 - start) for a2, b2 in pieces]
+        title_rep = None
+        if rcfg.get("five_titles", True) and d.get("titles") and not c.forced:
+            picked, title_rep = titles.pick(d)
+            if picked:
+                d["title_bar"] = picked
+                if d.get("highlight") and str(d["highlight"]).lower() not in picked.lower():
+                    d["highlight"] = None
+                if title_rep.get("note"):
+                    log("title: " + title_rep["note"], c.login)
 
         sfx_list, cues_out, fx_events, lib = [], [], [], None
         if rcfg.get("sound_effects", True) and rcfg.get("sound_library", True):
@@ -349,6 +386,29 @@ class Pipeline:
                 log("sound library not found (render.sound_library_path): using the old sus sound", c.login)
         if lib is not None:
             cues_out = map_cues(d.get("cues"), to_out, out_dur, lib, camp, rcfg)
+            if hook_on:
+                from . import soundlib
+                safe = rcfg.get("sound_safe_mode", True)
+
+                def fid(s, lb):
+                    return soundlib.fix_id(s, lb, not safe or bool((camp or {}).get("allow_music")),
+                                           not safe or bool((camp or {}).get("allow_explicit")))
+                pref = fid(d.get("hook_sfx"), lib) if d.get("hook_sfx") else None
+                if ht == "tension" and hp:          # the riser ends on the hit
+                    t_hit = to_out(hp[1])
+                    riser = pref if pref and "riser" in pref else fid("riser-air", lib)
+                    if t_hit is not None and riser and not any(cu["align"] == "end" and abs(cu["t"] - t_hit) < 0.3
+                                                               for cu in cues_out):
+                        cues_out.append({"t": round(t_hit, 3), "sfx": riser, "role": "support", "align": "end",
+                                         "gain_db": -6.0, "stop": 0.0, "duck": False, "kind": "riser", "max_len": 3.0,
+                                         "fx": [], "auto": True})
+                        hook_notes.append(f"riser {riser} ends on the hit at {t_hit:.2f}s")
+                elif pref and hook_len and not any(abs(cu["t"] - hook_len) < 0.25 for cu in cues_out):
+                    cues_out.append({"t": round(hook_len, 3), "sfx": pref, "role": "support", "align": "start",
+                                     "gain_db": -3.0, "stop": 0.0, "duck": False, "kind": "transition", "max_len": 1.5,
+                                     "fx": [], "auto": True})
+                cues_out, notes = hook_mod.ensure_opening_sound(cues_out, ht, hook_len, lib, fid)
+                hook_notes += notes
             fx_events = [(cu["t"], cu["fx"]) for cu in cues_out if cu.get("fx")]
         elif rcfg.get("sound_effects", True):
             allowed = [t.lower() for t in rcfg.get("sfx_types", ["sus"])]
@@ -399,7 +459,15 @@ class Pipeline:
                     continue
                 if t is not None and str(co.get("text", "")).strip():
                     callouts.append({"text": str(co["text"])[:40], "at": t, "color": co.get("color", "yellow")})
-            ass = viral.build_ass(words_out, callouts, out_dur, rcfg, layout, editor.REEL_CAM_H)
+            if cues_out:                          # callouts only on beats that also have a sound
+                callouts = [co for co in callouts if any(abs(cu["t"] - co["at"]) <= 0.5 for cu in cues_out)]
+            if rcfg.get("caption_style", "bold") == "bold":
+                ass = viral.build_ass_bold(words_out, callouts, out_dur, rcfg, layout, editor.REEL_CAM_H,
+                                           punch_words=d.get("punch_words") if isinstance(d.get("punch_words"), list) else None,
+                                           hook_text=d.get("hook_text") if hook_on else None,
+                                           hook_end=max(hook_len, 1.5) if hook_on else 0.0)
+            else:
+                ass = viral.build_ass(words_out, callouts, out_dur, rcfg, layout, editor.REEL_CAM_H)
         else:
             use_text_tag = not editor.handle_groups(rcfg) and not (rcfg.get("tag_image") and os.path.exists(rcfg["tag_image"]))
             ass = editor.build_ass(words, start, out_dur, d, rcfg, use_text_tag, layout)
@@ -409,7 +477,8 @@ class Pipeline:
             # sound pass: game audio with the jump cuts + the library cues, -14 LUFS (the picture isn't touched)
             from . import soundpass
             try:
-                game_wav = soundpass.cut_game_audio(c.rec_path, clip_abs, seg_rel, os.path.join(folder, "_game.wav"))
+                game_wav = soundpass.cut_game_audio(c.rec_path, clip_abs, seg_rel, os.path.join(folder, "_game.wav"),
+                                                    speeds=piece_speeds)
                 sound_rows = soundpass.placed(cues_out, lib)
                 mixed = soundpass.mix(game_wav, sound_rows, os.path.join(folder, "_mix.wav"), out_dur)
             except Exception as e:
@@ -418,7 +487,7 @@ class Pipeline:
         files, raw_offset = editor.render(c.rec_path, clip_abs, out_dur, folder, ass, layout, facecam,
                                           focus_x, sfx_list, rcfg, rcfg.get("raw_padding", 60),
                                           segments=seg_rel, title_png=title_png, mixed_audio=mixed,
-                                          fx_events=fx_events)
+                                          fx_events=fx_events, hook_zoom=hook_on, speeds=piece_speeds)
         censored, censor_regs = None, None
         if blur:                                    # nudity: find it in the finished clip, then render again pixelated
             ranges = censor.map_ranges(d.get("nudity_at"), to_out)
@@ -434,7 +503,8 @@ class Pipeline:
                 return None
             files, _ = editor.render(c.rec_path, clip_abs, out_dur, folder, ass, layout, facecam, focus_x, sfx_list,
                                      dict(rcfg, censor_regions=regs, save_raw=False), rcfg.get("raw_padding", 60),
-                                     segments=seg_rel, title_png=title_png, mixed_audio=mixed, fx_events=fx_events)
+                                     segments=seg_rel, title_png=title_png, mixed_audio=mixed, fx_events=fx_events,
+                                     hook_zoom=hook_on, speeds=piece_speeds)
             censored = dict(info, spots=len(regs))
             censor_regs = regs
             log(f"nudity pixelated: {len(regs)} spot(s) (detector {info.get('detector_spots', 0)}, "
@@ -463,9 +533,14 @@ class Pipeline:
             "heading": d.get("heading"), "title_bar": d.get("title_bar"), "highlight": d.get("highlight"),
             "emoji": d.get("emoji"), "category": d.get("category"),
             "jump_cuts": [[round(a2, 2), round(b2, 2)] for a2, b2 in seg_rel],
+            "piece_speeds": piece_speeds if any(sp != 1.0 for sp in piece_speeds) else None,
             "callouts": [{"text": co["text"], "at": round(co["at"], 2), "color": co["color"]} for co in callouts],
             "sound_effects": [{"file": os.path.basename(p), "at": round(t, 2)} for p, t in sfx_list],
             "sound": sound_meta, "needs_review": bool(sound_meta and sound_meta.get("needs_review")) or None,
+            "hook": {"type": ht, "in": hp[0] if hp else None, "out": hp[1] if hp else None, "length": round(hook_len, 2),
+                     "text": d.get("hook_text"), "sfx": d.get("hook_sfx"), "notes": hook_notes} if hook_on else None,
+            "titles": title_rep, "punch_words": d.get("punch_words") or None,
+            "slow_motion": [list(p) for p, sp in zip(seg_rel, piece_speeds) if sp != 1.0] or None,
             "what_happens": d.get("what_happens"),
             "user_context": c.user_context or None, "cut_by_hand": c.manual or None,
             "viral_score": score, "reason": d.get("reason"),

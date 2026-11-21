@@ -212,7 +212,7 @@ def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, 
     segments = [(float(a), float(b)) for a, b in (segments or [(0.0, dur)])]
     speeds = [max(0.5, min(1.0, float(s or 1.0))) for s in (speeds or [1.0] * len(segments))]
     dur = sum((b - a) / sp for (a, b), sp in zip(segments, speeds))
-    span = segments[-1][1]
+    span = max(b for _, b in segments)             # a hook piece can come first and be later in the source
     fonts = _fontsdir(out_dir)
     with open(os.path.join(out_dir, "captions.ass"), "w", encoding="utf-8") as f:
         f.write(ass_text)

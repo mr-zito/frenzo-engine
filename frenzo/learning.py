@@ -277,6 +277,11 @@ def title_fix(cfg, meta, new_title, source="typed"):
     old = meta.get("title_bar") or meta.get("heading") or meta.get("title") or ""
     if not new_title or new_title.strip() == old.strip():
         return None
+    try:                                      # your own titles join the title bank (examples for Claude)
+        from .titles import add
+        add(cfg, new_title, "edited", note=f"was: {old[:80]}")
+    except Exception:
+        pass
     return add_example(cfg, "retitled", {
         "login": meta.get("login"), "old": old, "new": new_title.strip(), "source": source,
         "context": str(meta.get("user_context") or "")[:400], "category": meta.get("category"),
@@ -689,6 +694,11 @@ def run_learning(cfg, dry_run=False, examples_file=None, force=False):
         log(f"only {len(exs)} example(s) so far: learning needs at least {MIN_EXAMPLES} (it never learns from one)", "learn")
         return None
     learned = load_learned(cfg)
+    try:                                       # posted / best-performing clips join the title bank
+        from .titles import refresh_from_clips
+        refresh_from_clips(cfg)
+    except Exception:
+        pass
     summary = build_summary(cfg, exs, decisions(cfg), learned)
     log(f"learning from {len(exs)} examples ({len(summary)} characters of stats)...", "learn")
     text, model = ask_claude(cfg, LEARN_PROMPT.format(summary=summary))

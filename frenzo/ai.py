@@ -27,8 +27,8 @@ TOOL = {
                       "setup begins, so the viewer sees what leads to the moment"},
             "end": {"type": "number", "description": "clip end, seconds from window start: 1.5-3 s AFTER the "
                     "reaction peaks, so the laugh / scream lands"},
-            "title_bar": {"type": "string", "description": "title shown for the whole clip between webcam and "
-                          "gameplay: sentence case, 3-10 words, NO emoji here. True to what_happens (a viewer who "
+            "title_bar": {"type": "string", "description": "the title you picked from titles, shown for the whole "
+                          "clip between webcam and gameplay: sentence case, 3-8 words, NO emoji here. True to what_happens (a viewer who "
                           "watches the clip must agree) AND funny: use the streamer's line, chat's joke or the "
                           "twist, not a flat description. e.g. 'Why did Kai shoot the dog?', 'Kai's new "
                           "girlfriend is a plane', 'This GTA 6 NPC wanted smoke', 'Insane GTA 6 bug'"},
@@ -48,7 +48,29 @@ TOOL = {
                              "at": {"type": "number", "description": "seconds from window start"},
                              "color": {"type": "string", "enum": ["yellow", "green", "pink", "red", "orange", "blue", "purple", "white"]}},
                              "required": ["text", "at", "color"]}},
-            "hook_text": {"type": "string", "description": "short alternative hook, max 6 words"},
+            "hook_text": {"type": "string", "description": "on-screen hook text during the first ~1.5 s: max 6 words, "
+                          "teases without spoiling"},
+            "hook_type": {"type": "string", "enum": ["cold_open", "reaction_first", "tension", "quote"],
+                          "description": "how the first 3 s grab the viewer (see HOOK)"},
+            "hook_in": {"type": "number", "description": "window seconds: start of the hook piece (cold_open: the "
+                        "payoff; reaction_first: the peak reaction; tension: one beat before it goes wrong; quote: "
+                        "the confident line)"},
+            "hook_out": {"type": "number", "description": "window seconds: end of the hook piece (cold_open 1-1.5 s "
+                         "after hook_in; tension: the hit)"},
+            "hook_sfx": {"type": "string", "description": "library id for the hook (cold_open: tape-rewind or "
+                         "record-scratch on the cut back; tension: riser-air ending on the hit)"},
+            "titles": {"type": "array", "description": "5 title candidates in DIFFERENT formats (see TITLES)",
+                       "items": {"type": "object", "properties": {"text": {"type": "string"},
+                                                                  "format": {"type": "string"}},
+                                 "required": ["text", "format"]}},
+            "title_pick": {"type": "integer", "description": "index 0-4 of the best candidate"},
+            "title_why": {"type": "string", "description": "one line: why that one"},
+            "punch_words": {"type": "array", "items": {"type": "string"},
+                            "description": "1-2 words from what the streamer SAYS in the clip to show in the "
+                                           "highlight colour: the joke word, a number, their key phrase"},
+            "slowmo": {"type": "array", "items": {"type": "number"},
+                       "description": "optional [start, end] window seconds (max 2 s) of the payoff in 0.5x slow "
+                                      "motion; [] for none"},
             "cues": {"type": "array", "description": "SOUND DESIGN with the GTA SFX library (see SOUND DESIGN): every "
                      "sound of the clip. [] only if the clip needs no sound at all.",
                      "items": {"type": "object", "properties": {
@@ -81,7 +103,8 @@ TOOL = {
             "reason": {"type": "string", "description": "one sentence: why this score"},
         },
         "required": ["what_happens", "keep", "viral_score", "category", "start", "end", "title_bar", "highlight", "emoji",
-                     "segments", "callouts", "cues", "title",
+                     "segments", "callouts", "cues", "hook_type", "hook_in", "hook_out", "hook_text", "titles",
+                     "title_pick", "punch_words", "title",
                      "caption", "hashtags", "spoiler", "nudity", "reason"],
     },
 }
@@ -189,6 +212,31 @@ that scene, not seconds after.
 bikinis and lingerie are not nudity. When nudity=true, also give nudity_at: the window seconds where it is visible \
 (be generous); the clip is kept and those parts are pixelated, so judge and score the moment as usual.
 - Flag spoiler=true for major story reveals (deaths of main characters, endings, plot twists)."""
+
+HOOK_RULES = """HOOK (first 3 seconds; the viewer decides in 1 second):
+- hook_type cold_open: show 1-1.5 s of the payoff first (hook_in/hook_out), then the clip rewinds to the setup \
+(tape-rewind or record-scratch as hook_sfx). reaction_first: the streamer's peak reaction from the facecam first, \
+then what caused it. tension: start one beat before it goes wrong; riser-air (align end) lands on the hit. quote: \
+open on the streamer's confident line right before the fail ("I got this"), then the hit.
+- Something moves, the hook text is on screen and a sound lands within the first 1.0 s.
+- Never open on dead air, a menu, the map, a loading screen or calm talking.
+- End 1-2 s after the reaction so the clip loops cleanly (no long outro).
+- hook_text: max 6 words, on screen during the hook; it teases, never tells the ending.
+
+TITLES (title_bar is the one on screen):
+- Write 5 titles in DIFFERENT formats, pick one (title_pick) and say why in one line (title_why).
+- On-screen title 3-8 words. Neither the title nor the caption may spoil the ending: if a title contains the \
+outcome (crashes, dies, gets arrested, falls, explodes...), rewrite it as a hook.
+- Banned: "funny moment", "hilarious", "reacts to", "GTA 6 gameplay", and any summary of the scene.
+- Formats to vary (not templates): "Bro thought / Bro really / Bro wants...", "POV: ...", "Nobody told him...", \
+"Wait for it...", "He had ONE job", "GTA 6 NPCs are built different", the ironic quote of the streamer's last \
+confident words, setup then twist.
+
+PACING:
+- No stretch longer than about 1.5 s without new information: cut it with segments.
+- One short slow-mo (slowmo, 0.5x, max 2 s) on the payoff is allowed when it makes the hit land.
+- Callouts: 0-4, and only on beats that also have a sound cue.
+"""
 
 
 def sound_section(cfg, camp=None):
@@ -372,8 +420,13 @@ class ClipJudge:
         clips = self.cfg["clips"]
         from .campaign import of
         camp = of((ctx or {}).get("scfg"))
+        extra = ""
+        if self.cfg["render"].get("hook", True) or self.cfg["render"].get("five_titles", True):
+            from .titles import prompt_block
+            extra = HOOK_RULES + "\nTITLE BANK (good hooks this page likes; vary the format, never copy):\n" \
+                + prompt_block(self.cfg)
         return SYSTEM.format(min_len=clips["min_length"], max_len=clips["max_length"]) + prompt_notes(self.cfg) \
-            + sound_section(self.cfg, camp)
+            + extra + sound_section(self.cfg, camp)
 
     def _system_file(self, text):
         """Write the static instructions once per content (Claude Code reads them with --system-prompt-file)."""
@@ -405,7 +458,8 @@ class ClipJudge:
         prompt = ("Reply with ONLY one JSON object (no markdown, no other text) with these keys: "
                   + fields + ". Types: keep/spoiler boolean, viral_score integer 0-10, start/end/focus_x numbers, "
                   "hashtags a list of strings, cues a list of objects (t, sfx, role, align, gain_db, stop, duck, kind, "
-                  "max_len, fx), the rest strings. Fill what_happens FIRST (from the frames + transcript), then write "
+                  "max_len, fx), titles a list of 5 {\"text\", \"format\"}, title_pick integer, punch_words a list "
+                  "of strings, slowmo [start, end] or [], hook_in/hook_out numbers, the rest strings. Fill what_happens FIRST (from the frames + transcript), then write "
                   "title_bar so it matches it." + frame_note + "\n\n" + self._prompt_text(ctx))
         sys_file = self._system_file(system)
         env = dict(os.environ)
