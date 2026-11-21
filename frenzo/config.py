@@ -14,7 +14,7 @@ DEFAULTS = {
         "only_when_playing": True,
     },
     "poll_seconds": 60,
-    "twitch": {"client_id": "", "client_secret": ""},
+    "twitch": {"client_id": "", "client_secret": "", "public_api": True},   # public_api: keyless viewer clips
     "kick": {"client_id": "", "client_secret": ""},
     "anthropic": {"api_key": "", "model": "claude-sonnet-5-5", "backend": "auto", "claude_code_model": "haiku",
                   "max_checks_per_hour": 30, "send_frames": True},

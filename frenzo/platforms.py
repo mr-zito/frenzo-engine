@@ -9,7 +9,7 @@ import requests
 
 from .chat import KickChat, TwitchChat, YouTubeChat
 from .config import placeholder
-from .twitch import TwitchAPI
+from .twitch import TwitchAPI, TwitchPublic, api_for
 from .util import log
 
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -75,14 +75,22 @@ class TwitchPlatform:
         self.cfg = cfg
         tw = cfg["twitch"]
         self.keyless = placeholder(tw["client_id"]) or placeholder(tw["client_secret"])
-        self.api = None if self.keyless else TwitchAPI(tw["client_id"], tw["client_secret"])
+        # clips: the official API with keys, else Twitch's public web API (twitch.public_api: false = off)
+        self.api = api_for(cfg)
         self.ids = {}
         self.game_id = None
         self.wrong = _WrongGameLog()
 
     def setup(self, streamers):
         if self.keyless:
-            log("no Twitch keys: using keyless live checks (viewer-clip signal off)", "twitch")
+            if self.api is not None:
+                try:
+                    self.ids = self.api.users([s["login"] for s in streamers])
+                except Exception as e:
+                    log(f"couldn't look up the Twitch channels ({str(e)[:80]})", "twitch")
+                log("no Twitch keys: keyless live checks; viewer clips from Twitch's public web API", "twitch")
+            else:
+                log("no Twitch keys: using keyless live checks (viewer-clip signal off)", "twitch")
             return
         self.game_id = self.api.game_id(self.cfg["game"]["name"])
         logins = [s["login"] for s in streamers]
@@ -102,7 +110,7 @@ class TwitchPlatform:
                     continue
                 if game_ok(self.cfg, s, m["category"]) or (not m["category"] and game_ok(self.cfg, s, m["title"])):
                     out[s["login"]] = LiveInfo("twitch", s["login"], m["author"] or s["login"], urls[s["login"]],
-                                               m["category"], m["title"])
+                                               m["category"], m["title"], user_id=self.ids.get(s["login"]))
                 else:
                     self.wrong.note(s["key"], m["category"])
             return out
@@ -124,7 +132,7 @@ class TwitchPlatform:
         return TwitchChat(info.login, f"twitch:{info.login}")
 
     def new_clips(self, info, since_iso):
-        if self.keyless or not info.user_id:
+        if self.api is None or not info.user_id:
             return []
         out = []
         for c in self.api.clips_since(info.user_id, since_iso):
@@ -133,13 +141,17 @@ class TwitchPlatform:
         return out
 
     def clips_raw(self, info, since_iso):
-        """Get Clips items (dicts) made since since_iso: the viewer-clip evidence (needs Twitch keys)."""
-        if self.keyless or not info.user_id:
+        """Get Clips items (dicts) made since since_iso: the viewer-clip evidence."""
+        if self.api is None or not info.user_id:
             return []
         return self.api.clips_since(info.user_id, since_iso)
 
     def clips_by_ids(self, ids):
-        return [] if self.keyless else self.api.clips_by_ids(ids)
+        return [] if self.api is None else self.api.clips_by_ids(ids)
+
+    @property
+    def public(self):
+        return isinstance(self.api, TwitchPublic)
 
 
 class KickPlatform:

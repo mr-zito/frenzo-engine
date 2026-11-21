@@ -85,3 +85,22 @@ class Replay(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Keyless(unittest.TestCase):
+    def test_public_api_answers_look_like_helix_and_are_filtered_by_time(self):
+        from frenzo.twitch import TwitchPublic
+        api = TwitchPublic()
+        node = {"slug": "AbcSlug", "title": "LMAO", "createdAt": "2026-11-21T02:45:17Z", "durationSeconds": 15,
+                "viewCount": 130, "isFeatured": False, "curator": {"id": "7", "login": "fan"},
+                "videoOffsetSeconds": 5219, "video": {"id": "99"}, "game": {"id": "1867279146"}}
+        old = dict(node, slug="Old", createdAt="2026-11-01T00:00:00Z")
+        pages = [{"user": {"clips": {"edges": [{"cursor": None, "node": node}, {"cursor": "MQ==", "node": old}],
+                                     "pageInfo": {"hasNextPage": False}}}}]
+        api._q = lambda q, v=None: pages[0]
+        out = api.clips_between("555", "2026-11-21T00:00:00Z", "2026-11-21T10:00:00Z")
+        self.assertEqual([c["id"] for c in out], ["AbcSlug"])
+        c = out[0]
+        self.assertEqual((c["creator_id"], c["creator_name"], c["video_id"], c["vod_offset"], c["broadcaster_id"]),
+                         ("7", "fan", "99", 5219, "555"))
+        self.assertEqual(c["url"], "https://clips.twitch.tv/AbcSlug")

@@ -204,6 +204,8 @@ def vod_clips(api, vod_id, chunk_hours=2.0, bots=crowd.DEFAULT_BOTS):
         return [], None
     start = crowd.parse_ts(v["created_at"])
     dur = twitch_duration(v.get("duration"))
+    if type(api).__name__ == "TwitchPublic":        # keyless: one most-viewed-first pass over the whole range
+        chunk_hours = (dur + 3600) / 3600.0
     out, seen = [], set()
     t = start
     while t < start + dur + 600:
@@ -245,7 +247,7 @@ def gather(cfg, scfg, vod, work, api=None, info=None):
         except Exception as e:
             log(f"viewer clips of this VOD unavailable ({str(e)[:100]})", scfg.get("key", ""))
     elif vid:
-        log("viewer clips of Twitch VODs need Twitch keys in config.yaml: skipped", scfg.get("key", ""))
+        log("viewer clips of Twitch VODs are off (no Twitch keys and twitch.public_api is false)", scfg.get("key", ""))
     # YouTube heatmap
     if ("youtu" in url) and pc.get("heatmap", True):
         peaks = heatmap_peaks((info or {}).get("heatmap"))

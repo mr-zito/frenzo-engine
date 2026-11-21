@@ -234,11 +234,8 @@ def clip_past_stream(cfg, scfg, vod, pipeline, top, report=None):
                         log(f"couldn't read the video's details ({str(e)[:100]})", tag)
                 api = None
                 if replay.twitch_vod_id(vod["url"]):
-                    from .config import placeholder
-                    tw = cfg["twitch"]
-                    if not placeholder(tw["client_id"]) and not placeholder(tw["client_secret"]):
-                        from .twitch import TwitchAPI
-                        api = TwitchAPI(tw["client_id"], tw["client_secret"])
+                    from .twitch import api_for
+                    api = api_for(cfg)
                 chat_dir = os.path.join(work, "chat")
                 os.makedirs(chat_dir, exist_ok=True)
                 crowd_res["found"], crowd_res["summary"], crowd_res["chat"] = replay.gather(cfg, scfg, vod, chat_dir, api, info)

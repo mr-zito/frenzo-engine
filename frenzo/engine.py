@@ -299,8 +299,8 @@ class Session(threading.Thread):
         target = None
         with self._lock:
             for a, cand in reversed(self.recent):
-                if now - (cand.flagged_wall or a) > open_for or cand.superseded:
-                    continue
+                if cand.superseded or (now - (cand.flagged_wall or a) > open_for and not cand.folder):
+                    continue                    # closed (a finished clip still collects confirmations)
                 before = cand.context_before if cand.context_before is not None else self.cfg["clips"]["context_before"]
                 after = cand.context_after if cand.context_after is not None else self.cfg["clips"]["context_after"]
                 if vc.span[0] <= a + after and vc.span[1] >= a - before:
@@ -494,7 +494,10 @@ class ClipWatcher:
             self.busy = False
 
     def _poll(self):
-        since = crowd.iso(time.time() - float(self.det.get("clip_lookback_minutes", 10)) * 60)
+        look = float(self.det.get("clip_lookback_minutes", 10))
+        if getattr(self.s.platform, "public", False):
+            look = max(look, 40.0)          # keyless: clips are listed most-viewed first, fresh ones show up later
+        since = crowd.iso(time.time() - look * 60)
         for raw in self.s.platform.clips_raw(self.s.info, since):
             vc = crowd.from_helix(raw)
             if vc.id in self.clips:
