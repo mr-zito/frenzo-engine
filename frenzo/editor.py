@@ -123,7 +123,41 @@ def tag_ass(handle, layout, rcfg):
     ]) + "\n"
 
 
-def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]"):
+def _windows(ranges):
+    if not ranges:
+        return "0"
+    return "min(1," + "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in ranges) + ")"
+
+
+def punch_filter(fx_events, w, h, hook_zoom=False):
+    """Picture effects on the GAMEPLAY band only (never the webcam band or the captions), at the cue times
+    Claude marked: zoom = punch-in that eases out, shake, flash; hook_zoom = frame 0 starts at 1.1x and eases
+    to 1.0 in half a second. Returns '' when there is nothing to do, else ',filter,filter...'."""
+    zt, shakes, flashes = [], [], []
+    for t, fx in fx_events or []:
+        t = float(t)
+        if "zoom" in fx:
+            zt.append(f"0.12*between(t,{t:.3f},{t + 0.6:.3f})*exp(-(t-{t:.3f})*7)")
+        if "shake" in fx:
+            shakes.append((t, t + 0.35))
+        if "flash" in fx:
+            flashes.append((t, t + 0.06))
+    if hook_zoom:
+        zt.append("0.1*max(0,1-t/0.5)")
+    if not zt and not shakes and not flashes:
+        return ""
+    S = _windows(shakes)
+    if shakes:
+        zt.append(f"0.06*{S}")                       # room around the picture for the shake
+    Z = "+".join(zt) or "0"
+    out = (f",scale=w='trunc({w}*(1+{Z})/2)*2':h='trunc({h}*(1+{Z})/2)*2':eval=frame:flags=bicubic,"
+           f"crop={w}:{h}:x='(iw-{w})/2+20*sin(t*83)*{S}':y='(ih-{h})/2+20*cos(t*71)*{S}'")
+    if flashes:
+        out += f",drawbox=x=0:y=0:w=iw:h=ih:color=white@0.7:t=fill:enable='{_windows(flashes)}'"
+    return out
+
+
+def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, hook_zoom=False):
     fx = min(max(focus_x, 0.0), 1.0)
     if layout == "reel" and cam:
         cam = {k: float(cam[k]) for k in ("x", "y", "w", "h")}
@@ -134,12 +168,12 @@ def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]"):
             f"scale={W}:{REEL_CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{REEL_CAM_H},"
             f"unsharp=5:5:0.7:5:5:0,setsar=1[cam];"
             f"[s2]crop=w=ih/{zoom}*{W}/{gh}:h=ih/{zoom}:x='clip(iw*{fx:.4f}-ow/2,0,iw-ow)':y=(ih-oh)/2,"
-            f"scale={W}:{gh}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1[game];"
+            f"scale={W}:{gh}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1{punch_filter(fx_events, W, gh, hook_zoom)}[game];"
             "[cam][game]vstack=inputs=2[v0]"
         )
     if layout in ("focus", "reel"):
         return (f"{src}crop=w=ih*{W}/{H}:h=ih:x='clip(iw*{fx:.4f}-ow/2,0,iw-ow)':y=0,"
-                f"scale={W}:{H}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1[v0]")
+                f"scale={W}:{H}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1{punch_filter(fx_events, W, H, hook_zoom)}[v0]")
     if layout == "stacked" and cam:
         return (
             f"{src}split=2[s1][s2];"
@@ -168,12 +202,16 @@ def _fontsdir(out_dir):
 
 
 def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, raw_pad=60,
-           segments=None, title_png=None, seam_y=None):
+           segments=None, title_png=None, seam_y=None, mixed_audio=None, fx_events=None, hook_zoom=False,
+           speeds=None):
     """start: where the clip starts in the recording. segments: jump-cut pieces as (a, b) seconds
-    relative to 'start' (None = one piece of length dur). sfx: (file, seconds in the OUTPUT)."""
+    relative to 'start' (None = one piece of length dur). sfx: (file, seconds in the OUTPUT).
+    mixed_audio: the finished sound (sound pass) to use instead of the game audio + sfx.
+    fx_events: [(output second, ["zoom", "shake", "flash"])] on the gameplay band. speeds: per piece (0.5 = slow-mo)."""
     os.makedirs(out_dir, exist_ok=True)
     segments = [(float(a), float(b)) for a, b in (segments or [(0.0, dur)])]
-    dur = sum(b - a for a, b in segments)
+    speeds = [max(0.5, min(1.0, float(s or 1.0))) for s in (speeds or [1.0] * len(segments))]
+    dur = sum((b - a) / sp for (a, b), sp in zip(segments, speeds))
     span = segments[-1][1]
     fonts = _fontsdir(out_dir)
     with open(os.path.join(out_dir, "captions.ass"), "w", encoding="utf-8") as f:
@@ -189,10 +227,14 @@ def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, 
     graph = f"{pre}split={k}" + "".join(f"[vs{i}]" for i in range(k))
     graph += f";[0:a]aresample=48000:async=1:first_pts=0,asplit={k}" + "".join(f"[as{i}]" for i in range(k))
     for i, (a, b) in enumerate(segments):
-        graph += (f";[vs{i}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[vp{i}]"
-                  f";[as{i}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[ap{i}]")
+        sp = speeds[i]
+        vslow = f",setpts=PTS/{sp:.3f}" if abs(sp - 1) > 1e-3 else ""
+        aslow = f",atempo={max(0.5, min(1.0, sp)):.3f}" if abs(sp - 1) > 1e-3 else ""
+        graph += (f";[vs{i}]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS{vslow}[vp{i}]"
+                  f";[as{i}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS{aslow}[ap{i}]")
     graph += ";" + "".join(f"[vp{i}][ap{i}]" for i in range(k)) + f"concat=n={k}:v=1:a=1[vcat][acat]"
-    graph += ";" + video_filter(layout, cam, focus_x, rcfg.get("game_zoom", 1.0), src="[vcat]")
+    graph += ";" + video_filter(layout, cam, focus_x, rcfg.get("game_zoom", 1.0), src="[vcat]",
+                                fx_events=fx_events if rcfg.get("punch_fx", True) else None, hook_zoom=hook_zoom)
     v0 = "[v0]"
     if rcfg.get("censor_regions"):                 # nudity: pixelated spots (under the captions and the title)
         from .censor import filter_graph
@@ -231,7 +273,13 @@ def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, 
         graph += f";{v1}null[vout]"
     # async=1 + first_pts=0: fill audio gaps (skipped ads, dropped segments) with silence so the
     # sound stays locked to the picture instead of sliding earlier after every gap
-    graph += ";[acat]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[main]"
+    if mixed_audio:                                  # the sound pass already made the final sound
+        inputs += ["-i", mixed_audio]
+        graph += f";[acat]anullsink;[{idx}:a]aresample=48000,apad=whole_dur={dur:.3f}[main]"
+        idx += 1
+        sfx = []
+    else:
+        graph += ";[acat]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[main]"
     mix = ["[main]"]
     vol = float(rcfg.get("sfx_volume", 0.8))
     for path, at in sfx or []:
@@ -272,20 +320,31 @@ def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, 
             label = f"[vt{i}]"
         labels.append((label, i, name))
 
-    def encode(on_gpu):
-        maps = []
+    def encode(on_gpu, which):
+        """which: indexes of the outputs to write in this ffmpeg run (the others go to a null sink)."""
+        maps, g = [], graph
         for label, i, name in labels:
-            maps += ["-map", label, "-map", f"[ao{i}]"] + enc(on_gpu) + [name]
-        run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"] + inputs + ["-filter_complex", graph] + maps,
+            if i in which:
+                maps += ["-map", label, "-map", f"[ao{i}]"] + enc(on_gpu) + [name]
+            else:
+                g += f";{label}nullsink;[ao{i}]anullsink"
+        run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"] + inputs + ["-filter_complex", g] + maps,
             cwd=out_dir)
-    try:
-        encode(gpu)
-    except RuntimeError as e:
-        if not gpu:
-            raise
-        from .util import log
-        log(f"GPU encoding failed ({str(e).splitlines()[-1][:100]}): encoding on the CPU instead", "render")
-        encode(False)
+
+    # the clean master and the MAIN platform version first (ready to post sooner), the other versions after
+    order = [list(range(len(labels)))]
+    if rcfg.get("main_first", True) and len(labels) > 2:
+        order = [[0, 1], list(range(2, len(labels)))]
+    for which in order:
+        try:
+            encode(gpu, which)
+        except RuntimeError as e:
+            if not gpu:
+                raise
+            from .util import log
+            log(f"GPU encoding failed ({str(e).splitlines()[-1][:100]}): encoding on the CPU instead", "render")
+            gpu = False
+            encode(False, which)
     for t in tag_files:
         os.remove(os.path.join(out_dir, t))
     run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", "1.5", "-i", base,

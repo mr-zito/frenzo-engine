@@ -57,6 +57,24 @@ def _fix_raw_sync(folder):
     os.replace(tmp, src)
 
 
+def cues_in_raw(meta):
+    """The clip's library sound cues (output timeline) -> raw.mp4 seconds, through the clip's jump cuts."""
+    cues = ((meta.get("sound") or {}).get("cues")) or []
+    if not cues:
+        return []
+    off = _clip_offset_in_raw(meta)
+    pieces = meta.get("jump_cuts") or [[0, meta.get("duration") or 0]]
+    out = []
+    for cu in cues:
+        t, acc = float(cu["t"]), 0.0
+        for a, b in pieces:
+            if t <= acc + (b - a) + 1e-6:
+                out.append(dict(cu, raw_t=off + a + (t - acc)))
+                break
+            acc += b - a
+    return out
+
+
 def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over=None):
     """No Claude: keep the clip's moment and title, rebuild it in the current style with margins.
     span=(start, end) in raw.mp4 seconds: a manual cut (no margins added). over: manual title /
@@ -112,7 +130,20 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
 
     heading = meta.get("heading") or meta.get("hook_text") or meta.get("title") or ""
     sfx = []
-    if rcfg.get("sound_effects", True) and str(meta.get("category", "")).lower() in ("sus", "spicy"):
+    # library sound cues: the clip's own cues, moved onto the new cut (cues in parts cut out are dropped)
+    lib_cues, lib = [], None
+    if rcfg.get("sound_effects", True) and rcfg.get("sound_library", True) and (meta.get("sound") or {}).get("cues"):
+        from . import soundlib
+        lib = soundlib.find_library(rcfg)
+        if lib is not None:
+            to_new = viral.mapper([(float(a), float(b)) for a, b in segs] if segs else [(0.0, dur)])
+            for cu in cues_in_raw(meta):
+                t = to_new(cu["raw_t"] - offset)
+                if t is not None and 0 <= t < dur:
+                    lib_cues.append({k: v for k, v in dict(cu, t=round(t, 3)).items() if k != "raw_t"})
+    if lib is not None:
+        pass
+    elif rcfg.get("sound_effects", True) and str(meta.get("category", "")).lower() in ("sus", "spicy"):
         at = next((e.get("at") for e in meta.get("sound_effects") or [] if "at" in e), dur * 0.4) + shift
         path = pick("sus")
         if path and 0 <= float(at) < dur:
@@ -141,11 +172,22 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
     ass = viral.build_ass(words, callouts, dur, rcfg, lay, editor.REEL_CAM_H)
 
     for old in os.listdir(dirpath):
-        if old.startswith("clip") and old.endswith(".mp4"):
+        if old.startswith("clip") and (old.endswith(".mp4") or old.endswith(".cues.json")):
             os.remove(os.path.join(dirpath, old))
     rcopy = dict(rcfg, save_raw=False)
+    mixed, game_wav, rows = None, None, []
+    if lib is not None and lib_cues:
+        from . import soundpass
+        try:
+            game_wav = soundpass.cut_game_audio(raw, offset, segs or [(0.0, dur)], os.path.join(dirpath, "_game.wav"))
+            rows = soundpass.placed(lib_cues, lib)
+            mixed = soundpass.mix(game_wav, rows, os.path.join(dirpath, "_mix.wav"), dur)
+        except Exception as e:
+            log(f"sound pass failed ({str(e)[:100]}): game audio only", login)
+            mixed = None
+    fx_events = [(cu["t"], cu["fx"]) for cu in lib_cues if cu.get("fx")] if mixed else None
     files_out, _ = editor.render(raw, offset, dur, dirpath, ass, lay, cam, focus, sfx, rcopy, segments=segs,
-                                 title_png=title_png)
+                                 title_png=title_png, mixed_audio=mixed, fx_events=fx_events)
     # nudity: the clip had pixelated spots -> pixelate again (same cut: same spots; new cut: find them again)
     if meta.get("nudity") and censor.mode(cfg) != "keep":
         if segs and meta.get("censor_regions") and over.get("segments"):
@@ -162,7 +204,8 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
             regs, info = censor.plan(os.path.join(dirpath, files_out[0]), [(0.0, dur)], dur, lay, chosen=True)
         if regs:
             files_out, _ = editor.render(raw, offset, dur, dirpath, ass, lay, cam, focus, sfx,
-                                         dict(rcopy, censor_regions=regs), segments=segs, title_png=title_png)
+                                         dict(rcopy, censor_regions=regs), segments=segs, title_png=title_png,
+                                         mixed_audio=mixed, fx_events=fx_events)
             log(f"nudity pixelated again: {len(regs)} spot(s)", login)
         else:
             log("no nudity left in your new cut: nothing pixelated", login)
@@ -170,6 +213,17 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
         meta["censor_regions"] = [list(r) for r in regs] if regs else None
     if title_png and os.path.exists(title_png):
         os.remove(title_png)
+    if mixed:
+        from .pipeline import sound_check
+        meta["sound"] = sound_check(dirpath, files_out, lib_cues, rows, lib, game_wav, dur, rcfg, login)
+        meta["needs_review"] = bool(meta["sound"].get("needs_review")) or None
+    elif meta.get("sound"):
+        meta["sound"] = dict(meta["sound"], cues=[])          # every cue was in a part you cut out
+    for tmp in ("_game.wav", "_mix.wav"):
+        try:
+            os.remove(os.path.join(dirpath, tmp))
+        except OSError:
+            pass
 
     groups = dict(editor.handle_groups(rcfg))
     meta.update({

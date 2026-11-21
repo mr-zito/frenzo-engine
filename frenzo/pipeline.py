@@ -73,6 +73,82 @@ def _nudity_raw(d, win_start, clip_abs, raw_offset, redo):
     return out or None
 
 
+def map_cues(cues, to_out, out_dur, lib, camp, rcfg):
+    """Claude's cues (window seconds) -> the final timeline through the jump cuts. Cues in cut-out pieces are dropped,
+    unknown sound ids are fixed (close typo) or dropped, safe mode is enforced."""
+    from . import soundlib
+    safe = rcfg.get("sound_safe_mode", True)
+    music = not safe or bool((camp or {}).get("allow_music"))
+    explicit = not safe or bool((camp or {}).get("allow_explicit"))
+    out, seen = [], set()
+    for cu in cues or []:
+        if not isinstance(cu, dict):
+            continue
+        try:
+            t = to_out(float(cu.get("t")))
+        except (TypeError, ValueError):
+            continue
+        sid = soundlib.fix_id(cu.get("sfx"), lib, music, explicit)
+        if t is None or sid is None or not 0 <= t < out_dur:
+            continue
+        key = (sid, round(t, 1))
+        if key in seen:
+            continue
+        seen.add(key)
+        fx = [f for f in (cu.get("fx") or []) if f in ("zoom", "shake", "flash")]
+        kind = cu.get("kind") if cu.get("kind") in ("hit", "voice", "music", "whoosh", "riser", "transition", "ui") \
+            else "hit"
+        try:
+            gain = max(-30.0, min(6.0, float(cu.get("gain_db") or 0)))
+            stop = max(0.0, min(0.6, float(cu.get("stop") or 0)))
+            max_len = max(0.2, min(8.0, float(cu.get("max_len") or 8.0)))
+        except (TypeError, ValueError):
+            gain, stop, max_len = 0.0, 0.0, 8.0
+        out.append({"t": round(t, 3), "sfx": sid, "role": cu.get("role") or "", "align": cu.get("align") or "start",
+                    "gain_db": gain, "stop": stop, "duck": bool(cu.get("duck", kind in ("voice", "music"))),
+                    "kind": kind, "max_len": max_len, "fx": fx})
+    return sorted(out, key=lambda x: x["t"])
+
+
+def sound_check(folder, files, cues, rows, lib, game_wav, out_dur, rcfg, login):
+    """check_reel.py on the clean clip; one automatic fix (mix again, put the sound into every version with
+    -c:v copy); still failing -> needs review (the report stays in sound_qa/)."""
+    from . import soundlib, soundpass
+    clip = os.path.join(folder, files[0])
+    soundpass.write_cues_json(clip, rows, out_dur)
+    entries = soundlib.load(lib)
+    meta = {"library": str(lib), "cues": cues, "autofix": [], "needs_review": False,
+            "music": [cu["sfx"] for cu in cues if "music" in (entries.get(cu["sfx"], {}).get("tags") or [])]}
+    if not rcfg.get("sound_check", True):
+        return meta
+    qa_dir = os.path.join(folder, "sound_qa")
+    qa = soundpass.check(clip, lib, qa_dir)
+    bad = soundpass.failing(qa)
+    if bad:
+        new_cues, changes = soundpass.autofix(cues, qa)
+        log("sound check: " + "; ".join(bad[:4]) + (" -> fixing: " + "; ".join(changes[:4]) if changes else ""), login)
+        if changes:
+            rows = soundpass.placed(new_cues, lib)
+            mixed = soundpass.mix(game_wav, rows, os.path.join(folder, "_mix.wav"), out_dur)
+            for f in files:
+                soundpass.remux(os.path.join(folder, f), mixed)
+            soundpass.write_cues_json(clip, rows, out_dur)
+            meta["cues"], meta["autofix"] = new_cues, changes
+            qa = soundpass.check(clip, lib, qa_dir)
+            bad = soundpass.failing(qa)
+    if qa:
+        meta["qa"] = {"lufs": qa.get("lufs"), "true_peak_dbfs": qa.get("true_peak_dbfs"),
+                      "cues_on_sync": sum(1 for r in qa.get("cues") or [] if str(r.get("verdict", "")).startswith("ok")),
+                      "cues": len(qa.get("cues") or []),
+                      "masked": [r["t"] for r in qa.get("cues") or [] if r.get("verdict") == "masked"],
+                      "off_sync": [r["t"] for r in qa.get("cues") or [] if r.get("verdict") == "off sync"],
+                      "issues": qa.get("issues") or []}
+    if bad:
+        meta["needs_review"] = True
+        log("sound check still failing after one fix: clip marked NEEDS REVIEW (" + "; ".join(bad[:3]) + ")", login)
+    return meta
+
+
 class Pipeline:
     def __init__(self, cfg, transcriber, judge):
         self.cfg = cfg
@@ -265,8 +341,16 @@ class Pipeline:
         out_dur = sum(b2 - a2 for a2, b2 in segs)
         seg_rel = [(a2 - start, b2 - start) for a2, b2 in segs]
 
-        sfx_list = []
-        if rcfg.get("sound_effects", True):
+        sfx_list, cues_out, fx_events, lib = [], [], [], None
+        if rcfg.get("sound_effects", True) and rcfg.get("sound_library", True):
+            from . import soundlib
+            lib = soundlib.find_library(rcfg)
+            if lib is None:
+                log("sound library not found (render.sound_library_path): using the old sus sound", c.login)
+        if lib is not None:
+            cues_out = map_cues(d.get("cues"), to_out, out_dur, lib, camp, rcfg)
+            fx_events = [(cu["t"], cu["fx"]) for cu in cues_out if cu.get("fx")]
+        elif rcfg.get("sound_effects", True):
             allowed = [t.lower() for t in rcfg.get("sfx_types", ["sus"])]
             for e in (d.get("sfx") or [])[:1]:
                 if str(e.get("type", "")).lower() not in allowed:
@@ -283,8 +367,10 @@ class Pipeline:
         if redo:
             folder = c.out_folder
             for old in os.listdir(folder):
-                if old.startswith("clip") and old.endswith(".mp4") or old in ("thumb.jpg", "captions.ass"):
+                if old.startswith("clip") and (old.endswith(".mp4") or old.endswith(".cues.json")) \
+                        or old in ("thumb.jpg", "captions.ass"):
                     os.remove(os.path.join(folder, old))
+            shutil.rmtree(os.path.join(folder, "sound_qa"), ignore_errors=True)
         else:
             folder = os.path.join(
                 self.cfg["storage"]["output_dir"], slugify(c.login), now.strftime("%Y-%m-%d"),
@@ -318,9 +404,21 @@ class Pipeline:
             use_text_tag = not editor.handle_groups(rcfg) and not (rcfg.get("tag_image") and os.path.exists(rcfg["tag_image"]))
             ass = editor.build_ass(words, start, out_dur, d, rcfg, use_text_tag, layout)
             callouts = []
+        mixed, game_wav, sound_rows = None, None, []
+        if lib is not None and cues_out:
+            # sound pass: game audio with the jump cuts + the library cues, -14 LUFS (the picture isn't touched)
+            from . import soundpass
+            try:
+                game_wav = soundpass.cut_game_audio(c.rec_path, clip_abs, seg_rel, os.path.join(folder, "_game.wav"))
+                sound_rows = soundpass.placed(cues_out, lib)
+                mixed = soundpass.mix(game_wav, sound_rows, os.path.join(folder, "_mix.wav"), out_dur)
+            except Exception as e:
+                log(f"sound pass failed ({str(e)[:120]}): game audio only", c.login)
+                mixed, sound_rows = None, []
         files, raw_offset = editor.render(c.rec_path, clip_abs, out_dur, folder, ass, layout, facecam,
                                           focus_x, sfx_list, rcfg, rcfg.get("raw_padding", 60),
-                                          segments=seg_rel, title_png=title_png)
+                                          segments=seg_rel, title_png=title_png, mixed_audio=mixed,
+                                          fx_events=fx_events)
         censored, censor_regs = None, None
         if blur:                                    # nudity: find it in the finished clip, then render again pixelated
             ranges = censor.map_ranges(d.get("nudity_at"), to_out)
@@ -336,7 +434,7 @@ class Pipeline:
                 return None
             files, _ = editor.render(c.rec_path, clip_abs, out_dur, folder, ass, layout, facecam, focus_x, sfx_list,
                                      dict(rcfg, censor_regions=regs, save_raw=False), rcfg.get("raw_padding", 60),
-                                     segments=seg_rel, title_png=title_png)
+                                     segments=seg_rel, title_png=title_png, mixed_audio=mixed, fx_events=fx_events)
             censored = dict(info, spots=len(regs))
             censor_regs = regs
             log(f"nudity pixelated: {len(regs)} spot(s) (detector {info.get('detector_spots', 0)}, "
@@ -344,6 +442,16 @@ class Pipeline:
                 c.login)
         if title_png and os.path.exists(title_png):
             os.remove(title_png)
+        sound_meta = None
+        if mixed:
+            sound_meta = sound_check(folder, files, cues_out, sound_rows, lib, game_wav, out_dur, rcfg, c.login)
+            from . import soundlib
+            soundlib.remember(self.cfg, rcfg, [cu["sfx"] for cu in cues_out])
+        for tmp in ("_game.wav", "_mix.wav"):
+            try:
+                os.remove(os.path.join(folder, tmp))
+            except OSError:
+                pass
         clip_dur = out_dur
 
         tags = " ".join(dict.fromkeys(
@@ -357,6 +465,7 @@ class Pipeline:
             "jump_cuts": [[round(a2, 2), round(b2, 2)] for a2, b2 in seg_rel],
             "callouts": [{"text": co["text"], "at": round(co["at"], 2), "color": co["color"]} for co in callouts],
             "sound_effects": [{"file": os.path.basename(p), "at": round(t, 2)} for p, t in sfx_list],
+            "sound": sound_meta, "needs_review": bool(sound_meta and sound_meta.get("needs_review")) or None,
             "what_happens": d.get("what_happens"),
             "user_context": c.user_context or None, "cut_by_hand": c.manual or None,
             "viral_score": score, "reason": d.get("reason"),
@@ -400,6 +509,9 @@ class Pipeline:
             json.dump(meta, f, ensure_ascii=False, indent=2)
         with open(os.path.join(folder, "caption.txt"), "w", encoding="utf-8") as f:
             f.write(campaign.caption_txt(meta, files, raw_offset, camp))
+            if sound_meta and sound_meta.get("music"):
+                f.write("\n\nNOTE: this clip uses short music clips (" + ", ".join(sound_meta["music"])
+                        + "): TikTok / Instagram / YouTube may mute or demonetise it.\n")
         if redo:
             log(f"RE-EDITED ({clip_dur:.0f}s): '{meta['old_title']}' -> '{d.get('title_bar')}'", c.login)
             return folder

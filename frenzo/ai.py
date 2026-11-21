@@ -49,11 +49,23 @@ TOOL = {
                              "color": {"type": "string", "enum": ["yellow", "green", "pink", "red", "orange", "blue", "purple", "white"]}},
                              "required": ["text", "at", "color"]}},
             "hook_text": {"type": "string", "description": "short alternative hook, max 6 words"},
-            "sfx": {"type": "array", "description": "the sus sound effect, ONLY if the moment is sus: [] otherwise",
-                    "items": {"type": "object", "properties": {
-                        "type": {"type": "string", "enum": ["sus"]},
-                        "at": {"type": "number", "description": "seconds from window start"}},
-                        "required": ["type", "at"]}},
+            "cues": {"type": "array", "description": "SOUND DESIGN with the GTA SFX library (see SOUND DESIGN): every "
+                     "sound of the clip. [] only if the clip needs no sound at all.",
+                     "items": {"type": "object", "properties": {
+                         "t": {"type": "number", "description": "seconds from WINDOW start: the contact frame (the "
+                               "frame the car touches the wall, the player lands, the line is said)"},
+                         "sfx": {"type": "string", "description": "exact sound id from the catalog"},
+                         "role": {"type": "string", "enum": ["realism", "joke", "support"]},
+                         "align": {"type": "string", "enum": ["peak", "end", "start"]},
+                         "gain_db": {"type": "number"},
+                         "stop": {"type": "number", "description": "0.15-0.5: game audio near-silent just before t "
+                                  "(the stop before the hit), on 1-2 big hits per clip only; 0 otherwise"},
+                         "duck": {"type": "boolean", "description": "true under voice lines and music stabs"},
+                         "kind": {"type": "string", "enum": ["hit", "voice", "music", "whoosh", "riser", "transition", "ui"]},
+                         "max_len": {"type": "number", "description": "cut the sound after this many seconds"},
+                         "fx": {"type": "array", "items": {"type": "string", "enum": ["zoom", "shake", "flash"]},
+                                "description": "picture punch on the gameplay at t: impacts only, [] otherwise"}},
+                         "required": ["t", "sfx", "align", "kind"]}},
             "focus_x": {"type": "number", "description": "0-1: horizontal centre of the player's character or "
                         "vehicle in the GAMEPLAY frames (0 = left edge, 0.5 = middle, 1 = right edge); the crop "
                         "is centred there. Ignore chat boxes, alerts and the webcam."},
@@ -69,7 +81,7 @@ TOOL = {
             "reason": {"type": "string", "description": "one sentence: why this score"},
         },
         "required": ["what_happens", "keep", "viral_score", "category", "start", "end", "title_bar", "highlight", "emoji",
-                     "segments", "callouts", "sfx", "title",
+                     "segments", "callouts", "cues", "title",
                      "caption", "hashtags", "spoiler", "nudity", "reason"],
     },
 }
@@ -161,8 +173,7 @@ crazy gameplay) 🤣 (pure laugh).
 ("*Laughing*", "*Screaming*" in yellow), a punchline quote ("Nah chat" white, "Gawd~" pink), or a meme \
 label for what happens on screen ("+$1k" green, "PS5 stick drift" red, "NPC wanted smoke" orange). Each \
 shows ~1.6 s. Small captions of everything said are added automatically, don't repeat them all.
-- sfx: ONLY for sus or spicy moments (suspicious, awkward, "ayo", thirsty beat): one {{"type": "sus", "at": <second>}} placed \
-exactly on the most suspicious beat (window time). For anything that isn't sus, sfx must be [].
+- cues: the clip's sound design, see SOUND DESIGN below.
 - focus_x: the vertical clip only shows a slice of the gameplay. Look at the frames and give the \
 horizontal centre of the player's character or vehicle (the camera follows it, so it's usually near \
 0.5). If the moment is about an NPC away from the player, centre between the player and the NPC, or on \
@@ -178,6 +189,59 @@ that scene, not seconds after.
 bikinis and lingerie are not nudity. When nudity=true, also give nudity_at: the window seconds where it is visible \
 (be generous); the clip is kept and those parts are pixelated, so judge and score the moment as usual.
 - Flag spoiler=true for major story reveals (deaths of main characters, endings, plot twists)."""
+
+
+def sound_section(cfg, camp=None):
+    """SKILL.md sections 1-2 + the compact library catalog (only what safe mode allows). Static: it lives in the
+    cached system prompt."""
+    rcfg = cfg["render"]
+    if not rcfg.get("sound_library", True):
+        return ""
+    from . import soundlib
+    lib = soundlib.find_library(rcfg)
+    if lib is None:
+        return ""
+    safe = rcfg.get("sound_safe_mode", True)
+    music = not safe or bool((camp or {}).get("allow_music"))
+    explicit = not safe or bool((camp or {}).get("allow_explicit"))
+    return (SOUND_RULES_INTRO + "\nTHE SKILL'S RULES (ids are library ids):\n" + soundlib.rules(lib)
+            + ("\n\nSAFE MODE: sounds tagged music or explicit are not available (song clips get videos muted)."
+               if not music else "\n\nMusic clips are allowed for this campaign: keep them short (max_len 1.5-4).")
+            + "\n\nCATALOG (id | tags | length | peak):\n" + soundlib.catalog(lib, music, explicit))
+
+
+def sound_context(cfg, ctx):
+    """Per-moment sound hints: library tags matching why it was flagged, and the account's recently used sounds."""
+    rcfg = cfg["render"]
+    if not rcfg.get("sound_library", True):
+        return ""
+    from . import soundlib
+    if soundlib.find_library(rcfg) is None:
+        return ""
+    tags = soundlib.hints_for(ctx.get("source", ""))
+    used = soundlib.recent(cfg, rcfg)
+    out = ""
+    if tags:
+        out += "\nSOUND HINTS (from why it was flagged): look first at library tags " + ", ".join(tags) + "."
+    if used:
+        out += "\nRECENTLY USED on this account (avoid unless the repeat is the joke): " + ", ".join(used[:60]) + "."
+    return out
+
+
+SOUND_RULES_INTRO = """SOUND DESIGN (the "cues" field). Every sound comes from the GTA SFX library (catalog below: id | tags | length | \
+where its loudest moment is). A pro meme edit LAYERS sounds: the realistic sound of what the picture shows \
+(role realism, 3-6 dB under the joke) AND the meme sound that comments on it (role joke), on the SAME contact \
+frame (same t). Ask "what's the joke here?", not "where is it loud?".
+- t is in WINDOW seconds, like start/end/segments; a cue must be inside a segment you keep (cues in cut-out \
+parts are dropped). Being 1-2 frames early feels snappy; late feels broken.
+- Spacing: one featured sound every 2-4 s of the FINAL clip (transitions and whooshes don't count); 3-10 cues \
+for a 15-30 s clip. A sound must land in the first 1.5 s of the clip (the hook).
+- "stop" (0.15-0.5 s) on 1-2 big hits only: it makes the hit land. duck=true only under voice lines and music \
+stabs. fx (zoom/shake/flash) only on impacts.
+- Never the same sound twice in one clip unless the repetition IS the joke. Avoid the account's recently used \
+sounds (listed with the moment) unless the repeat is the joke.
+- Calm talking, a hot take or an awkward pause: few sounds, let it breathe.
+"""
 
 
 def campaign_rules(ctx):
@@ -300,12 +364,31 @@ class ClipJudge:
             "CHAT:\n" + ("\n".join(chat) or "(no chat data)") + "\n\n"
             f"LOUDNESS (dBFS, every 2 s): {loud}\n\n"
             f"Hashtags to always include: {' '.join(ctx['tags']) or '(none)'}"
-            + ctx.get("crowd", "") + ctx.get("score_line", "") + campaign_rules(ctx)
+            + ctx.get("crowd", "") + ctx.get("score_line", "") + sound_context(self.cfg, ctx) + campaign_rules(ctx)
         )
 
-    def _decide_claude_code(self, ctx):
+    def system_text(self, ctx=None):
+        """The static instructions (cached by Claude: identical for every moment of the same streamer setup)."""
         clips = self.cfg["clips"]
-        system = SYSTEM.format(min_len=clips["min_length"], max_len=clips["max_length"]) + prompt_notes(self.cfg)
+        from .campaign import of
+        camp = of((ctx or {}).get("scfg"))
+        return SYSTEM.format(min_len=clips["min_length"], max_len=clips["max_length"]) + prompt_notes(self.cfg) \
+            + sound_section(self.cfg, camp)
+
+    def _system_file(self, text):
+        """Write the static instructions once per content (Claude Code reads them with --system-prompt-file)."""
+        import hashlib
+        import tempfile
+        h = hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+        path = os.path.join(tempfile.gettempdir(), f"frenzo_system_{h}.txt")
+        if not os.path.exists(path):
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                f.write(text)
+            os.replace(path + ".tmp", path)
+        return path
+
+    def _decide_claude_code(self, ctx):
+        system = self.system_text(ctx)
         fields = ", ".join(TOOL["input_schema"]["properties"])
         import tempfile
         work = tempfile.mkdtemp(prefix="frenzo_ai_")
@@ -319,17 +402,20 @@ class ClipJudge:
                 names.append(name)
             frame_note = ("\n\nFIRST look at these stream frames with the Read tool (all in the current folder, "
                           "read them all in one go): " + ", ".join(names) + "\n")
-        prompt = (system + "\n\nReply with ONLY one JSON object (no markdown, no other text) with these keys: "
+        prompt = ("Reply with ONLY one JSON object (no markdown, no other text) with these keys: "
                   + fields + ". Types: keep/spoiler boolean, viral_score integer 0-10, start/end/focus_x numbers, "
-                  "hashtags a list of strings, sfx a list of {\"type\":..., \"at\":...}, the rest strings. Fill what_happens FIRST (from the frames + transcript), then write title_bar so it matches it."
-                  + frame_note + "\n\n" + self._prompt_text(ctx))
+                  "hashtags a list of strings, cues a list of objects (t, sfx, role, align, gain_db, stop, duck, kind, "
+                  "max_len, fx), the rest strings. Fill what_happens FIRST (from the frames + transcript), then write "
+                  "title_bar so it matches it." + frame_note + "\n\n" + self._prompt_text(ctx))
+        sys_file = self._system_file(system)
         env = dict(os.environ)
         env.pop("ANTHROPIC_API_KEY", None)   # make sure your Claude plan is used, not paid API credits
         model = self.cfg["anthropic"].get("claude_code_model", "haiku")
         try:
             res = subprocess.run(
                 [self.claude_code, "-p", "--output-format", "json", "--model", model,
-                 "--max-turns", "6" if frame_note else "1", "--allowedTools", "Read"],
+                 "--max-turns", "6" if frame_note else "1", "--allowedTools", "Read",
+                 "--system-prompt-file", sys_file],
                 input=prompt.encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 timeout=240, env=env, cwd=work,
             )
@@ -392,13 +478,13 @@ class ClipJudge:
             "CHAT:\n" + ("\n".join(chat) or "(no chat data)") + "\n\n"
             f"LOUDNESS (dBFS, every 2 s): {loud}\n\n"
             f"Hashtags to always include: {' '.join(ctx['tags']) or '(none)'}"
-            + ctx.get("crowd", "") + ctx.get("score_line", "") + campaign_rules(ctx)
+            + ctx.get("crowd", "") + ctx.get("score_line", "") + sound_context(self.cfg, ctx) + campaign_rules(ctx)
         )})
         try:
             msg = self.client.messages.create(
                 model=self.cfg["anthropic"]["model"],
-                max_tokens=1200,
-                system=SYSTEM.format(min_len=clips["min_length"], max_len=clips["max_length"]) + prompt_notes(self.cfg),
+                max_tokens=2500,
+                system=[{"type": "text", "text": self.system_text(ctx), "cache_control": {"type": "ephemeral"}}],
                 tools=[TOOL],
                 tool_choice={"type": "tool", "name": "clip_decision"},
                 messages=[{"role": "user", "content": content}],

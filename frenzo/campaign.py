@@ -32,7 +32,7 @@ POSITIONS = ["top-left", "top", "top-right", "center", "bottom-left", "bottom", 
 OVERLAY_DEFAULT = {"file": "", "position": "top-right", "size": 22, "opacity": 1.0}
 DEFAULT = {"name": "", "link": "", "instructions": "", "hashtags": [], "mentions": [],
            "platforms": ["tiktok", "instagram", "youtube", "x"], "min_seconds": 0, "max_seconds": 0,
-           "watermark": True, "captions": True, "sound_effects": True,
+           "watermark": True, "captions": True, "sound_effects": True, "allow_music": False, "allow_explicit": False,
            # an image the campaign requires on every clip (logo, sponsor badge...)
            "overlay": OVERLAY_DEFAULT,
            # EXTRA content this campaign wants: added searches for this streamer, existing detection unchanged
@@ -77,6 +77,8 @@ def normalize(block):
         out["min_seconds"] = out["max_seconds"]
     for k in ("watermark", "captions", "sound_effects"):
         out[k] = b.get(k) is not False
+    for k in ("allow_music", "allow_explicit"):          # sound library: off unless the campaign allows them
+        out[k] = b.get(k) is True
     ov = b.get("overlay") if isinstance(b.get("overlay"), dict) else {}
     pos = str(ov.get("position") or OVERLAY_DEFAULT["position"]).strip().lower()
     out["overlay"] = {"file": str(ov.get("file") or "").strip()[:300],
