@@ -71,7 +71,8 @@ class ChaosAnalyzer:
                 for i, v in enumerate(sustained):
                     tc = t[i + k // 2]
                     if v > thresh and tc > self.last_t and tc - self.last_trigger > self.cooldown:
-                        events.append((float(tc), float(v / max(base, 1e-6))))
+                        # ratio vs a floor of 2: a near-still baseline (menus, a 144p preview) gave "8224005x"
+                        events.append((float(tc), float(min(50.0, v / max(base, 2.0)))))
                         self.last_trigger = tc
         for ti, vi in zip(t[new], d[new]):
             self.hist.append((float(ti), float(vi)))

@@ -32,6 +32,11 @@ def safe_id(vod_id):
 _T = r"(?:\d+:)?(?:\d+:)?\d+(?:\.\d+)?"
 
 
+def _hms(t):
+    t = max(0.0, float(t))
+    return f"{int(t // 3600)}:{int(t % 3600 // 60):02d}:{t % 60:04.1f}"
+
+
 def parse_time(text):
     """'1:23:45', '83:20', '5025', '5025.5' -> seconds."""
     parts = str(text).strip().split(":")
@@ -224,7 +229,7 @@ def cut(cfg, target, ranges, note=None, no_judge=False, mode="claude", title=Non
     try:
         for a, b in ranges:
             cm = {}
-            log(f"your cut: {a / 60:.0f}:{a % 60:04.1f} -> {b / 60:.0f}:{b % 60:04.1f}", tag)
+            log(f"your cut: {_hms(a)} -> {_hms(b)}", tag)
             path, start = _piece(cfg, meta, local, a, b, work, tag)
             src = ("CUT BY HAND by the page owner from a past stream: this whole window is the moment they want. Make "
                    "the best clip from it (keep=true). Stay INSIDE this window: you may trim it, never go outside")
