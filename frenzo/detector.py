@@ -1,7 +1,26 @@
 """Finds hype moments from chat speed."""
+import math
 import re
 import statistics
 import time
+
+DEFAULT_DELAY = 6.0         # chat reacts ~6 s after what it sees (replaced by the learned per-streamer delay)
+
+
+def poisson_tail(k, lam):
+    """P(X >= k) for X ~ Poisson(lam): how surprising k messages are when lam is this chat's normal count."""
+    lam = max(lam, 1e-6)
+    if k <= 0:
+        return 1.0
+    if lam > 60:                                   # normal approximation (with continuity correction)
+        z = (k - 0.5 - lam) / math.sqrt(lam)
+        return 0.5 * math.erfc(z / math.sqrt(2))
+    term = math.exp(-lam)
+    cdf = term
+    for i in range(1, int(k)):
+        term *= lam / i
+        cdf += term
+    return max(0.0, 1.0 - cdf)
 
 HYPE = re.compile(
     r"(KEKW|LUL|OMEGALUL|LMAO+|LMFAO|ICANT|💀|😂|🤣|\bW+\b|POG|PogU|Pog|CLIP IT|CLIPPED|NO WAY|WTF|HOLY|"
@@ -35,7 +54,8 @@ class SusDetector:
         self.chat, self.window, self.min_hits = chat, window, min_hits
         self.pattern = pattern or SUS
         self.cooldown = cfg["cooldown_seconds"]
-        self.last = 0.0
+        self.last = -1e18
+        self.delay = DEFAULT_DELAY          # learned chat delay (set by the engine)
 
     def check(self, now=None):
         now = now or time.time()
@@ -43,7 +63,7 @@ class SusDetector:
         hits = sum(1 for _, _, text in msgs if self.pattern.search(text))
         if hits >= self.min_hits and hits >= 0.15 * max(1, len(msgs)) and now - self.last > self.cooldown:
             self.last = now
-            return now - self.window * 0.6, hits
+            return now - self.window * 0.6 - (self.delay - DEFAULT_DELAY), hits
         return None
 
 
@@ -54,25 +74,35 @@ class SpikeDetector:
         self.mult = cfg["spike_multiplier"]
         self.min_msgs = cfg["min_messages_in_window"]
         self.cooldown = cfg["cooldown_seconds"]
-        self.history = []  # (time, score)
-        self.last_trigger = 0.0
+        # "scaled": instead of a fixed 15 messages, the burst must be very unlikely for THIS chat's normal speed
+        # (Poisson test), so small streamers can trigger and big chats still need a real spike
+        self.floor = cfg.get("chat_floor", "scaled")
+        self.history = []  # (time, weighted score, message count)
+        self.last_trigger = -1e18
         self.started = time.time()
+        self.delay = DEFAULT_DELAY          # learned chat delay (set by the engine)
 
     def check(self, now=None):
         """Return (anchor_wall_time, ratio) when chat spikes, else None."""
         now = now or time.time()
         score = self.chat.count_between(now - self.window, now, hype_weight)
-        self.history = [(t, s) for t, s in self.history if t > now - 300]
-        baseline_vals = [s for t, s in self.history if t < now - self.window]
-        self.history.append((now, score))
-        if now - self.started < 60 or len(baseline_vals) < 6:
+        count = self.chat.count_between(now - self.window, now)
+        self.history = [h for h in self.history if h[0] > now - 300]
+        older = [h for h in self.history if h[0] < now - self.window]
+        self.history.append((now, score, count))
+        if now - self.started < 60 or len(older) < 6:
             return None  # still learning this chat's normal speed
-        baseline = max(statistics.median(baseline_vals), 1.0)
+        baseline = max(statistics.median([h[1] for h in older]), 1.0)
         ratio = score / baseline
-        if score >= self.min_msgs and ratio >= self.mult and now - self.last_trigger > self.cooldown:
+        if self.floor == "fixed":
+            enough = score >= self.min_msgs
+        else:
+            normal = statistics.mean([h[2] for h in older])
+            enough = count >= 5 and poisson_tail(count, max(normal, 0.5)) < 1e-3
+        if enough and ratio >= self.mult and now - self.last_trigger > self.cooldown:
             self.last_trigger = now
-            # Chat reacts a few seconds after the moment happens
-            return now - self.window * 0.6, ratio
+            # Chat reacts a few seconds after the moment happens (learned per streamer)
+            return now - self.window * 0.6 - (self.delay - DEFAULT_DELAY), ratio
         return None
 
 

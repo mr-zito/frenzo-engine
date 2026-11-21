@@ -374,6 +374,7 @@ class Pipeline:
             "raw_clip": "raw.mp4 has 1 min before and after the clip; the clip starts at "
                         f"{raw_offset:.1f}s in raw.mp4",
             "created": now.isoformat(timespec="seconds"),
+            "seconds_flag_to_clip": round(time.time() - c.flagged_wall, 1) if c.flagged_wall and not redo else None,
             "posted": {"tiktok": False, "youtube": False, "instagram": False, "x": False},
         }
         if redo:
@@ -404,7 +405,8 @@ class Pipeline:
             return folder
         self._log_csv(meta, folder)
         self.saved.setdefault(c.login, []).append(time.time())
-        log(f"SAVED clip ({clip_dur:.0f}s, score {score}) -> {folder}", c.login)
+        speed = f", {time.time() - c.flagged_wall:.0f}s after the flag" if c.flagged_wall else ""
+        log(f"SAVED clip ({clip_dur:.0f}s, score {score}{speed}) -> {folder}", c.login)
         return folder
 
     def _facecam(self, c, start, dur):

@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 
-from . import campaign, crowd, scoring
+from . import campaign, chatdelay, crowd, scoring
 from .ai import ClipJudge
 from .analyzer import Transcriber
 from .detector import BUG, GAMEPLAY, NPC, SPICY, LoudnessDetector, SpikeDetector, SusDetector
@@ -66,6 +66,7 @@ class Session(threading.Thread):
         if self.chat:
             self.chat.start()
         spikes = SpikeDetector(self.chat, det) if self.chat else None
+        self.chat_delay = chatdelay.delay_for(self.cfg, self.tag, self.info.platform)
         sus = SusDetector(self.chat, det) if self.chat else None
         spicy = SusDetector(self.chat, det, pattern=SPICY) if self.chat else None
         bugchat = SusDetector(self.chat, det, pattern=BUG, min_hits=4) if self.chat else None
@@ -80,6 +81,13 @@ class Session(threading.Thread):
         def camp_listener():
             return HotTakeDetector(self.recorder, self.cfg, only=camp_speech) if camp_speech is not None else None
         campsp = camp_listener()
+        for d_ in (spikes, sus, spicy, bugchat, npcchat, playchat, learnchat, campchat):
+            if d_ is not None:
+                d_.delay = self.chat_delay
+        if self.chat and det.get("learned_chat_delay", True):
+            learned_d = chatdelay.learned(self.cfg, self.tag)
+            log(f"chat delay: {self.chat_delay:.0f} s (" + ("learned from this streamer's chat" if learned_d is not None
+                else "platform default until enough reactions are measured") + ")", self.tag)
         if campchat or campsp:
             log("also looking for the campaign's content: " + campaign.looks_for(camp)[:150], self.tag)
         mode = det["loudness_triggers"]
@@ -172,6 +180,8 @@ class Session(threading.Thread):
                     hit = voice.check(time.time())
                     if hit:
                         self._queue(hit[0], f"streamer reaction: {hit[1]}")
+                        if self.chat and det.get("learned_chat_delay", True):
+                            self._measure_chat_delay(hit[0])
                 if loud:
                     hit = loud.check()
                     if hit:
@@ -256,6 +266,29 @@ class Session(threading.Thread):
         cand.priority = scoring.priority(cand)
         self.recent = [(a, c) for a, c in self.recent if a > anchor_wall - 600] + [(anchor_wall, cand)]
         self.work_q.put(cand)
+        self._trim_waiting()
+
+    def _trim_waiting(self):
+        """Hourly cap keeps the best: when far more moments of this streamer wait than the hour can still take,
+        the weakest waiting ones make room for stronger ones (they would never be edited in time anyway)."""
+        if not (self.cfg.get("queue") or {}).get("cap_keeps_best", True) or not hasattr(self.work_q, "waiting"):
+            return
+        cap = int(self.cfg["clips"].get("max_per_hour_per_streamer") or 0)
+        if not cap:
+            return
+        mine = [c for c in self.work_q.waiting() if c.login == self.info.login and not c.manual and not c.clips]
+        room = max(6, 3 * cap)                  # most judged moments are rejected: keep ~3 candidates per slot
+        if len(mine) <= room:
+            return
+        for c in sorted(mine, key=lambda c: c.priority)[: len(mine) - room]:
+            if self.work_q.remove(c):
+                c.superseded = True
+                log(f"dropped a weaker waiting moment (score {c.priority:.1f}) for stronger ones: "
+                    f"{c.source.split(' [')[0][:70]}", self.tag)
+                c.status = "replaced"
+                c.done = True
+                if c.on_done:
+                    c.on_done()
 
     # ------------------------------------------------------------------ viewer clips (crowd evidence)
     def add_clip(self, vc, part):
@@ -378,6 +411,21 @@ class Session(threading.Thread):
                 log(f"couldn't save the lesson ({str(e)[:80]})", self.tag)
         with self._lock:
             self.crowd_moments = keep[-200:]
+
+    def _measure_chat_delay(self, t_event):
+        """30 s after a voice reaction, record how chat reacted after it (for the learned chat delay)."""
+        def later():
+            time.sleep(max(0.0, t_event + chatdelay.MAX_LAG + 3 - time.time()))
+            try:
+                c = chatdelay.curve(self.chat, t_event)
+                if c is not None:
+                    d = chatdelay.add_curve(self.cfg, self.tag, c)
+                    if d is not None and abs(d - self.chat_delay) >= 1:
+                        log(f"chat delay re-measured: {d:.0f} s (was {self.chat_delay:.0f} s)", self.tag)
+                        self.chat_delay = d
+            except Exception:
+                pass
+        threading.Thread(target=later, daemon=True).start()
 
     def _done(self, path=None):
         with self._lock:
