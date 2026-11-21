@@ -9,10 +9,13 @@ game:
 
 poll_seconds: 60                      # how often to check who is live
 
-# Only needed if you have Twitch streamers (README step 3a)
+# Twitch keys are OPTIONAL (README step 3a). Without them Frenzo uses keyless live checks, and viewer clips come
+# from Twitch's public web API: free, but it only lists each channel's ~100 most-viewed clips per day/week, so
+# little-watched fresh clips can be missed. With keys (free at dev.twitch.tv) every clip is seen.
 twitch:
   client_id: "PASTE_TWITCH_CLIENT_ID"
   client_secret: "PASTE_TWITCH_CLIENT_SECRET"
+  public_api: true                     # false = no viewer clips without keys
 
 # Only needed if you have Kick streamers (README step 3b)
 kick:
@@ -70,6 +73,50 @@ detection:
   voice_sensitivity: "normal"    # low / normal / high
   loudness_triggers: "off"       # off / when_no_chat / always : flag any sudden loud sound (game included)
   loudness_jump_db: 12
+  # --- viewer clips as EVIDENCE (live) ---
+  clip_evidence: true            # false = the old way (a clip is just one more signal)
+  clip_open_minutes: 5           # a moment stays open this long: viewer clips landing on it boost it (and a
+                                 # moment Claude rejected is judged again with the clip evidence)
+  clip_poll_fast_seconds: 25     # after any other signal, check that streamer's clips this often...
+  clip_fast_minutes: 5           # ...for this long (base rate: clip_poll_seconds)
+  clip_lookback_minutes: 10      # each check asks for clips of the last N minutes
+  clip_delay_seconds: 6          # a live clip ends about this long before it was made (then matched by sound)
+  clip_align: true               # download each clip and find its exact second by matching its sound
+  clip_lead_in: 25               # seconds kept before a viewer clip's span (the setup)
+  clip_tail: 8
+  clip_keep_bonus: 1             # 3+ different clippers (or featured): keep threshold lowered by this much
+  clip_strong_clippers: 3
+  clip_strong_views: 1000
+  clip_fast_views_per_min: 30    # a clip gaining views this fast moves its moment to the front of the queue
+  clip_bots: ["streamelements", "nightbot", "moobot", "fossabot", "streamlabs"]   # never count as viewers
+  clip_lessons: true             # strong viewer clips become "missed" / "confirmed" lessons for learning
+  # --- picking moments ---
+  learned_chat_delay: true       # per-streamer chat delay, measured from chat vs the streamer's reactions
+  chat_delay_seconds: 6          # fallback (Twitch 6, Kick 8, YouTube 10 until measured)
+  chat_floor: "scaled"           # scaled = the burst must be very unlikely for THIS chat (small streamers can
+                                 # trigger); fixed = the old "min_messages_in_window" rule
+
+queue:
+  best_first: true               # edit the best waiting moment first (combined score), not the oldest
+  cap_keeps_best: true           # hourly cap: weaker waiting moments make room for stronger ones
+
+past:                            # past streams (VODs)
+  crowd_signals: true            # viewer clips, chat replay and YouTube "Most replayed" before the detectors
+  chat_replay: true
+  chat_replay_max_minutes: 180   # long streams' chat replay downloads slowly: use what came by then
+  twitch_downloader: ""          # path of TwitchDownloaderCLI.exe for Twitch chat replay (empty = on PATH)
+  heatmap: true
+  keep_preview_hours: 48         # keep each past stream's preview so you can cut it by hand (0 = delete)
+  piece_lead: 30                 # harvest: seconds downloaded before a viewer clip
+  piece_tail: 10
+
+harvest:                         # frenzo harvest <streamer>, or "Harvest viewer clips" in the app
+  enabled: true
+  top: 10
+  min_clippers: 2
+  min_views: 0
+  schedule_minutes: 0            # 0 = off; otherwise harvest every Twitch streamer this often
+                                 # (or per streamer: harvest_every_minutes: 60)
 
 clips:
   min_score: 6                   # Claude's 0-10 score needed to save a clip
@@ -85,6 +132,7 @@ clips:
   context_after: 20              # and after it
   lead_in: 1.5                   # extra seconds kept before the setup, so viewers see what's going on
   tail: 2.0                      # extra seconds kept after the reaction, so the laugh lands
+                                 # (with render.hook on: lead_in at most 0.5 s and tail 1-2 s: hook rules)
   min_setup: 4.0                 # a clip always shows at least this much before the flagged moment
 
 transcription:
@@ -103,8 +151,19 @@ render:
   caption_size: 56
   callout_size: 64               # big coloured meme texts like "*Laughing*", "+$1k"
   caption_font: "Montserrat ExtraBold"   # bundled in assets/fonts
-  sound_effects: true            # the "sus" sound on sus moments only
-  sfx_types: ["sus"]             # which sound effects are allowed (also available: boom, dramatic, fail, whoosh, ding)
+  sound_effects: true            # sound effects at all (false = game audio only)
+  sound_library: true            # Claude plans sounds from your GTA SFX library (false = the old single sus sound)
+  sound_library_path: ""         # empty = the installed gta-reel-sound-studio skill's gta_sfx_library
+  sound_check: true              # check_reel.py on every clip, one automatic fix, else "needs review"
+  sound_safe_mode: true          # no "music" / "explicit" sounds unless the campaign says allow_music / allow_explicit
+  sound_no_repeat: 15            # avoid sounds the account used in its last N clips
+  punch_fx: true                 # punch-in / shake / flash on the gameplay band at the sound cues
+  main_first: true               # encode the clean + main platform version first, the others after
+  hook: true                     # hook rules for the first 3 s (cold open / reaction first / tension / quote)
+  caption_style: "bold"          # bold = 1-3 words ALL CAPS on the seam with karaoke pop; mini = the old small ones
+  five_titles: true              # 5 title candidates, checked for spoilers / banned phrases, all kept in meta.json
+  trim_dead_air: true            # cut quiet, wordless stretches longer than ~1.5 s
+  sfx_types: ["sus"]             # (old sound mode only) which built-in sounds are allowed
   sfx_volume: 0.8
   game_zoom: 1.0                 # zoom into the gameplay (1.0 = none, so cars/characters at the bottom aren't cut)
   heading_size: 72
