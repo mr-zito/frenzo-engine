@@ -437,6 +437,11 @@ class Pipeline:
             if hook_on and hook_len and rcfg.get("sound_max_per_clip"):   # the rewind on the cut back counts too
                 rc_cap = dict(rcfg, sound_max_per_clip=max(1, int(rcfg["sound_max_per_clip"]) - 1))
             cues_out = map_cues(d.get("cues"), to_out, out_dur, lib, camp, rc_cap)
+            from . import soundlib as _sl
+            _g = _sl.guide(rcfg, lib)
+            # the rewind sound belongs to the hook only (on the cut back to the start), never mid-clip
+            cues_out = [cu for cu in cues_out if (_g.get(cu["sfx"]) or {}).get("effect") != "hook_rewind"
+                        or (hook_len and abs(cu["t"] - hook_len) < 0.6)]
             if hook_on:
                 from . import soundlib
                 safe = rcfg.get("sound_safe_mode", True)
