@@ -226,7 +226,8 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
         meta["sound"] = sound_check(dirpath, files_out, lib_cues, rows, lib, game_wav, dur, rcfg, login)
         meta["needs_review"] = bool(meta["sound"].get("needs_review")) or None
     elif meta.get("sound"):
-        meta["sound"] = dict(meta["sound"], cues=[])          # every cue was in a part you cut out
+        meta["sound"] = dict(meta["sound"], cues=[], qa=None)  # every cue was cut out (or removed from your list)
+        meta["needs_review"] = None
     for tmp in ("_game.wav", "_mix.wav"):
         try:
             os.remove(os.path.join(dirpath, tmp))
