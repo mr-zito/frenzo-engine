@@ -96,7 +96,10 @@ class Hook(unittest.TestCase):
         self.assertEqual(len(cues), 1)
         self.assertEqual(cues[0]["fx"], ["zoom"])                        # Claude's own opening sound gets the punch
         cues, _ = hook.ensure_opening_sound([], "action", 0, None, fix, prefer="tape-rewind")
-        self.assertEqual(cues[0]["sfx"], "tape-rewind")
+        self.assertEqual(cues[0]["sfx"], "whoosh-fast")                  # not an impact/whoosh: not an opener
+        cues, _ = hook.ensure_opening_sound([{"t": 9.0, "sfx": "whoosh-fast"}], "action", 0, None,
+                                            lambda s, lib: s if s in {"whoosh-fast", "boom"} else None)
+        self.assertEqual([c["sfx"] for c in cues], ["boom", "whoosh-fast"])   # never the same sound twice
 
 
 class Captions(unittest.TestCase):

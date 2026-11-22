@@ -12,7 +12,8 @@ TYPES = ("action", "tension", "quote", "cold_open", "reaction_first")
 DEFAULT_TYPES = ("action", "tension", "quote")      # render.hook_types (the rewind styles are off by default)
 DEFAULT_SFX = {"cold_open": ["record-scratch", "tape-rewind"], "reaction_first": ["record-scratch", "whoosh-fast"],
                "tension": ["riser-air"], "quote": ["vine-boom-slowed", "whoosh-fast"]}
-OPEN_SFX = ["whoosh-fast", "boom", "vine-boom-slowed", "deep-boom", "whoosh"]
+# the sound that opens a clip (the audio hook): an impact or a whoosh, never a slow build
+OPEN_SFX = ["whoosh-fast", "boom", "vine-boom-slowed", "taco-bell-bong", "flashbang-loud", "deep-boom", "whoosh"]
 
 
 def mapper(segments, speeds=None, offset=0.0):
@@ -143,7 +144,9 @@ def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None, c
             if "zoom" not in (c.get("fx") or []) and not set(c.get("fx") or []) & {"slow_zoom", "zoom_hold"}:
                 c["fx"] = list(c.get("fx") or []) + ["zoom"]
     else:
-        sid = next((fix_id(s, lib) for s in ([prefer] if prefer else []) + OPEN_SFX if s and fix_id(s, lib)), None)
+        used = {c["sfx"] for c in cues}              # never the same sound twice in a clip
+        choices = ([prefer] if prefer in OPEN_SFX else []) + OPEN_SFX
+        sid = next((fix_id(s, lib) for s in choices if s and fix_id(s, lib) and fix_id(s, lib) not in used), None)
         if sid:
             # whooshes and booms land by their peak (the sound kit's rule); 0.35 s leaves room for the first frames
             cues.append({"t": 0.35, "sfx": sid, "role": "support", "align": "peak", "gain_db": -3.0, "stop": 0.0,

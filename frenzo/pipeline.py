@@ -477,7 +477,8 @@ class Pipeline:
                 for cu in cues_out:                 # sounds added by code get their effect from your list too
                     g = soundlib.guide(rcfg, lib).get(cu["sfx"]) if cu.get("auto") else None
                     if g:
-                        cu["fx"] = list(soundlib.EFFECT_FX.get(g.get("effect") or "", []))
+                        keep = ["zoom"] if "zoom" in (cu.get("fx") or []) else []   # the hook's punch-in stays
+                        cu["fx"] = list(dict.fromkeys(list(soundlib.EFFECT_FX.get(g.get("effect") or "", [])) + keep))
                         cu.setdefault("dur", float(soundlib.load(lib)[cu["sfx"]].get("duration") or 1.0))
             fx_events = [(cu["t"], cu["fx"], cu.get("dur") or 1.0) for cu in cues_out if cu.get("fx")]
             if frz:                                 # zoom on the item during the pause
