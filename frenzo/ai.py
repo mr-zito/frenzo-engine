@@ -87,7 +87,10 @@ TOOL = {
                          "kind": {"type": "string", "enum": ["hit", "voice", "music", "whoosh", "riser", "transition", "ui"]},
                          "max_len": {"type": "number", "description": "cut the sound after this many seconds"},
                          "fx": {"type": "array", "items": {"type": "string", "enum": ["zoom", "shake", "flash"]},
-                                "description": "picture punch on the gameplay at t: impacts only, [] otherwise"}},
+                                "description": "picture punch on the gameplay at t: impacts only, [] otherwise"},
+                         "mute_game": {"type": "number", "description": "only when the page owner asks to remove "
+                                       "a sound that is in the stream audio: seconds of stream audio silenced from "
+                                       "this cue's start; 0 otherwise"}},
                          "required": ["t", "sfx", "align", "kind"]}},
             "focus_x": {"type": "number", "description": "0-1: horizontal centre of the player's character or "
                         "vehicle in the GAMEPLAY frames (0 = left edge, 0.5 = middle, 1 = right edge); the crop "

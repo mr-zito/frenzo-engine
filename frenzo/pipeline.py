@@ -3,6 +3,7 @@ import csv
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import statistics
 import threading
@@ -47,6 +48,7 @@ class Candidate:
     forced: Optional[dict] = None      # decision given by hand (no Claude)
     fallback: Optional[dict] = None    # decision to use if Claude can't answer
     user_context: str = ""             # what happens, written by you
+    owner_note: str = ""               # re-edit: what you asked to change -> your note beats the automatic rules
     learn_log: Optional[tuple] = None  # (decision, note, window start) for the learning decision log
     # crowd evidence (viewer clips, heatmap, chat replay) and the editing queue
     clips: list = field(default_factory=list)   # crowd.ViewerClip objects that landed on this moment
@@ -75,9 +77,14 @@ def _nudity_raw(d, win_start, clip_abs, raw_offset, redo):
     return out or None
 
 
-def map_cues(cues, to_out, out_dur, lib, camp, rcfg):
+def _norm_title(t):
+    return re.sub(r"[^a-z0-9]+", " ", str(t or "").lower()).strip()
+
+
+def map_cues(cues, to_out, out_dur, lib, camp, rcfg, repeat=False):
     """Claude's cues (window seconds) -> the final timeline through the jump cuts. Cues in cut-out pieces are dropped,
-    unknown sound ids are fixed (close typo) or dropped, safe mode is enforced."""
+    unknown sound ids are fixed (close typo) or dropped, safe mode is enforced.
+    repeat: the same sound may play more than once (you asked for it in a re-edit note)."""
     from . import soundlib
     safe = rcfg.get("sound_safe_mode", True)
     music = not safe or bool((camp or {}).get("allow_music"))
@@ -95,7 +102,7 @@ def map_cues(cues, to_out, out_dur, lib, camp, rcfg):
         sid = soundlib.fix_id(cu.get("sfx"), lib, music, explicit, only=set(guide) or None)
         if t is None or sid is None or not 0 <= t < out_dur:
             continue
-        key = sid if guide else (sid, round(t, 1))    # with your list: never the same sound twice in a clip
+        key = sid if guide and not repeat else (sid, round(t, 1))   # with your list: never the same sound twice
         if key in seen:
             continue
         seen.add(key)
@@ -114,10 +121,17 @@ def map_cues(cues, to_out, out_dur, lib, camp, rcfg):
             max_len = max(0.2, min(8.0, float(cu.get("max_len") or 8.0)))
         except (TypeError, ValueError):
             gain, stop, max_len = 0.0, 0.0, 8.0
-        out.append({"t": round(t, 3), "sfx": sid, "role": cu.get("role") or "", "align": cu.get("align") or "start",
-                    "gain_db": gain, "stop": stop, "duck": bool(cu.get("duck", kind in ("voice", "music"))),
-                    "kind": kind, "max_len": max_len, "fx": fx, "mute_after": mute_after,
-                    "dur": round(min(max_len, float(entries[sid].get("duration") or 1.0)), 3)})
+        try:                                       # silence a sound in the stream audio (this sound replaces it)
+            mute_game = max(0.0, min(8.0, float(cu.get("mute_game") or 0)))
+        except (TypeError, ValueError):
+            mute_game = 0.0
+        row = {"t": round(t, 3), "sfx": sid, "role": cu.get("role") or "", "align": cu.get("align") or "start",
+               "gain_db": gain, "stop": stop, "duck": bool(cu.get("duck", kind in ("voice", "music"))),
+               "kind": kind, "max_len": max_len, "fx": fx, "mute_after": mute_after,
+               "dur": round(min(max_len, float(entries[sid].get("duration") or 1.0)), 3)}
+        if mute_game:
+            row["mute_game"] = round(mute_game, 2)
+        out.append(row)
     cap = int(rcfg.get("sound_max_per_clip", 0) or 0) if guide else 0
     if cap and len(out) > cap:                      # Claude lists the most important first: keep those
         out = out[:cap]
@@ -225,6 +239,9 @@ class Pipeline:
         redo = c.out_folder is not None
         if redo:
             rcfg = dict(rcfg, save_raw=False)          # raw.mp4 is the source here: keep it as it is
+        # a re-edit with your note: Claude's cut and sounds follow it, so the automatic rules (dead-air trim, open on
+        # the action, margins, auto sounds, sound cap, title swap, 45 s limit) don't change its answer afterwards
+        obey = redo and bool((c.owner_note or "").strip()) and rcfg.get("reedit_obey_note", True)
         if not redo and not c.manual and not self._rate_ok(c.login):
             log("hourly clip limit reached (see max_per_hour in config), skipping moment", c.login)
             c.learn_log = (None, "not judged: hourly clip limit reached", None)
@@ -246,7 +263,7 @@ class Pipeline:
             after = max(5.0, c.clip_span[1] + float(det.get("clip_tail", 8)) - c.anchor)
         win_start = max(0.0, c.anchor - before)
         win_dur = c.anchor + after - win_start
-        log(f"analysing {win_dur:.0f}s window around {c.anchor:.0f}s ({c.source})", c.login)
+        log(f"analysing {win_dur:.0f}s window around {c.anchor:.0f}s ({c.source[:240]})", c.login)
 
         audio = analyzer.extract_audio(c.rec_path, win_start, win_dur)
         if len(audio) < analyzer.RATE * 5:
@@ -332,7 +349,14 @@ class Pipeline:
             return None
 
         min_len, max_len = campaign.length_bounds(ccfg, camp)
-        start, end = self._fix_bounds(float(d["start"]), float(d["end"]), win_dur, min_len, max_len)
+        if obey:                                   # your note sets the length (a campaign's max still applies)
+            max_len = float(camp["max_seconds"]) if camp and camp.get("max_seconds") else max(max_len, 180.0)
+        s0, e0 = float(d["start"]), float(d["end"])
+        # the length limit counts the seconds that are KEPT: pieces Claude cut out in the middle don't count
+        kept0 = viral.clean_segments(d.get("segments"), s0, e0) if rcfg.get("jump_cuts", True) else [[s0, e0]]
+        kept_len = sum(b2 - a2 for a2, b2 in kept0)
+        span_max = max_len + max(0.0, (e0 - s0) - kept_len) if kept_len <= max_len else max_len
+        start, end = self._fix_bounds(s0, e0, win_dur, min_len, span_max)
         clip_dur = end - start
 
         clip_abs = win_start + start
@@ -357,6 +381,8 @@ class Pipeline:
         segs = viral.clean_segments(d.get("segments"), start, end) if rcfg.get("jump_cuts", True) else [[start, end]]
         if sum(b2 - a2 for a2, b2 in segs) < ccfg["min_length"] * 0.6:   # Claude cut too much: keep the whole span
             segs = [[start, end]]
+        if sum(b2 - a2 for a2, b2 in segs) > max_len:                  # too long: trimmed from the end
+            segs = campaign.fit_segments(segs, 0.0, win_dur, 0, max_len)
         # ---- hook rules (first 3 s) and pacing: Claude chooses, code enforces ----
         hook_on = bool(rcfg.get("hook", True)) and not c.forced and layout in ("reel", "focus")
         ht, hp = hook_mod.hook_piece(d, win_dur, tuple(rcfg.get("hook_types") or hook_mod.DEFAULT_TYPES)) \
@@ -364,11 +390,14 @@ class Pipeline:
         lead, tail = float(clip_value(self.cfg, "lead_in", 1.5)), float(clip_value(self.cfg, "tail", 2.0))
         if hook_on:                        # open on the action, end 1-2 s after the reaction (clean loop)
             lead, tail = min(lead, 0.5), max(1.0, min(tail, 2.0))
+        if obey:                           # your note: Claude's start and end exactly
+            lead, tail = 0.0, 0.0
         # ---- context margins: a little before the setup and after the reaction, so the clip makes sense ----
         segs = viral.add_margins(segs, lead, tail, 0.0, win_dur,
-                                 min_setup_before=(rel, float(ccfg.get("min_setup", 4.0))) if c.source else None)
+                                 min_setup_before=(rel, float(ccfg.get("min_setup", 4.0)))
+                                 if c.source and not obey else None)
         hook_notes = []
-        if hook_on:
+        if hook_on and not obey:
             if rcfg.get("trim_dead_air", True):
                 before_n = sum(b2 - a2 for a2, b2 in segs)
                 segs = hook_mod.trim_dead_air(segs, words, loud, protect=rel)
@@ -422,7 +451,11 @@ class Pipeline:
         out_dur = hook_len + sum((b2 - a2) / sp for (a2, b2), sp in zip(segs, speeds))
         seg_rel = [(a2 - start, b2 - start) for a2, b2 in pieces]
         title_rep = None
-        if rcfg.get("five_titles", True) and d.get("titles") and not c.forced:
+        old_t = (c.keep_meta or {}).get("title_bar") or (c.keep_meta or {}).get("heading") or ""
+        kept_old_title = redo and old_t and _norm_title(d.get("title_bar")) == _norm_title(old_t)
+        if kept_old_title:
+            log("title: Claude kept the clip's title", c.login)
+        if rcfg.get("five_titles", True) and d.get("titles") and not c.forced and not kept_old_title:
             picked, title_rep = titles.pick(d)
             if picked:
                 d["title_bar"] = picked
@@ -439,15 +472,17 @@ class Pipeline:
                 log("sound library not found (render.sound_library_path): using the old sus sound", c.login)
         if lib is not None:
             rc_cap = rcfg
-            if hook_on and rcfg.get("sound_max_per_clip"):   # one of the sounds is kept for the hook
+            if obey:                                  # the sounds you asked for: no cap, no automatic extras
+                rc_cap = dict(rcfg, sound_max_per_clip=0)
+            elif hook_on and rcfg.get("sound_max_per_clip"):   # one of the sounds is kept for the hook
                 rc_cap = dict(rcfg, sound_max_per_clip=max(1, int(rcfg["sound_max_per_clip"]) - (2 if hook_len else 1)))
-            cues_out = map_cues(d.get("cues"), to_out, out_dur, lib, camp, rc_cap)
+            cues_out = map_cues(d.get("cues"), to_out, out_dur, lib, camp, rc_cap, repeat=obey)
             from . import soundlib as _sl
             _g = _sl.guide(rcfg, lib)
             # the rewind sound belongs to the hook only (on the cut back to the start), never mid-clip
             cues_out = [cu for cu in cues_out if (_g.get(cu["sfx"]) or {}).get("effect") != "hook_rewind"
                         or (hook_len and abs(cu["t"] - hook_len) < 0.6)]
-            if hook_on:
+            if hook_on and not obey:
                 from . import soundlib
                 safe = rcfg.get("sound_safe_mode", True)
 

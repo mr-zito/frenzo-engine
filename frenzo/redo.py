@@ -262,6 +262,55 @@ def _raw_length(path):
         return 0.0
 
 
+def _out_to_src(pieces, speeds, t):
+    """A second of the finished clip -> seconds after the clip's start in raw.mp4 (through its jump cuts)."""
+    acc = 0.0
+    for (a, b), sp in zip(pieces, speeds):
+        n = (b - a) / sp
+        if t <= acc + n + 1e-6:
+            return a + (t - acc) * sp
+        acc += n
+    return pieces[-1][1] if pieces else t
+
+
+def _owner_block(meta, offset, lo, win_len):
+    """For a re-edit note: the CURRENT clip as the owner watches it (its pieces and sounds), in both timelines,
+    so 'at second 11', 'move the faah 1 s later', 'remove the sounds' and 'keep the end' mean exactly that."""
+    dur = float(meta.get("duration") or 0)
+    pieces = [(float(a), float(b)) for a, b in (meta.get("jump_cuts") or [[0, dur]])]
+    speeds = [float(s) for s in (meta.get("piece_speeds") or [])]
+    if len(speeds) != len(pieces):
+        speeds = [1.0] * len(pieces)
+
+    def win(t_out):
+        return offset + _out_to_src(pieces, speeds, t_out) - lo
+
+    rows, acc = [], 0.0
+    for (a, b), sp in zip(pieces, speeds):
+        n = (b - a) / sp
+        rows.append(f"clip {acc:.1f}-{acc + n:.1f}s = window {offset + a - lo:.1f}-{offset + b - lo:.1f}s"
+                    + (" (slowed)" if sp < 0.99 else ""))
+        acc += n
+    cues = ((meta.get("sound") or {}).get("cues")) or []
+    snd = "; ".join(f"{cu.get('sfx')} at clip {float(cu['t']):.1f}s = window {win(float(cu['t'])):.1f}s"
+                    for cu in cues if cu.get("sfx") and cu.get("t") is not None) or "none"
+    marks = ", ".join(f"clip {s}s = window {win(s):.1f}s" for s in range(0, int(dur) + 1, 5))
+    return (f". THE CURRENT CLIP (what the owner watched, {dur:.1f}s long): {'; '.join(rows)}. Its sounds now: {snd}. "
+            f"Second marks: {marks}. "
+            "HOW TO FOLLOW THE OWNER'S NOTE: (1) seconds the owner writes ('at second 11', 'the 23s') are seconds of "
+            "THE CURRENT CLIP: turn them into window seconds with the lines above before you use them; 'X s later / "
+            "further' moves that sound X s later than it is now. (2) The note beats every usual rule (hook, length, "
+            "number of sounds, never the same sound twice, dead air): do what it says, nothing else. Keep everything "
+            "the note doesn't mention as it is now: the same start and end, the same pieces and the same sounds at "
+            "the same window seconds, unless the note asks to change them. (3) 'cues' is the COMPLETE list of sounds "
+            "of the new clip: put back the current sounds you keep, leave out those the owner wants removed, add "
+            "the new ones (only ids from the allowed list). Nothing is added by code afterwards. (4) A length the "
+            "owner asks for ('about 30 s', 'a bit shorter') is the total of your segments. (5) To remove a sound "
+            "that is IN the stream audio, put a cue there with mute_game = how many seconds of stream audio to "
+            "silence (a replacement sound if the owner names one). (6) Say in 'reason' what you did for each "
+            "request, with the clip seconds in the NEW clip")
+
+
 def _reedit_with_claude(pipe, cfg, dirpath, meta, login, note=None, span=None, context=None):
     """Claude re-watches the moment in raw.mp4 and re-cuts it. Returns (ok, status).
     note: what the user wants changed. span=(start, end): Claude may only cut inside it."""
@@ -285,8 +334,9 @@ def _reedit_with_claude(pipe, cfg, dirpath, meta, login, note=None, span=None, c
     if old_a < -0.5 or old_b > win_len + 0.5:
         where += (f" (the old cut went from {old_a:.0f}s to {old_b:.0f}s: it starts before and/or ends after the "
                   f"window you chose, so only the part inside the window is available)")
+    owner = _owner_block(meta, offset, lo, win_len) if note and note.strip() else ""
     c = Candidate(
-        login=login, display_name=meta.get("streamer") or login, rec_path=raw, anchor=anchor,
+        login=login, display_name=meta.get("streamer") or login, rec_path=raw, anchor=anchor, owner_note=note or "",
         source=(f"RE-EDIT of a clip we already made: the old cut was {where} and its old title was "
                 f"'{old_title}'. If that title is TRUE (matches what the frames and "
                 f"transcript show), KEEP it as title_bar (it was written with the chat's context and is often funnier); "
@@ -296,6 +346,7 @@ def _reedit_with_claude(pipe, cfg, dirpath, meta, login, note=None, span=None, c
                    f"This is TRUE: trust it over your own reading of the frames, base what_happens and the title on it"
                    if context and context.strip() else "")
                 + (f". THE PAGE OWNER ASKS: \"{note.strip()}\" (follow this)" if note and note.strip() else "")
+                + owner
                 + (". The owner chose this window by hand: use the moment inside it" if span else "")),
         streamer_cfg=scfg, game=meta.get("game") or cfg["game"]["name"], platform=meta.get("platform", "twitch"),
         stream_title=meta.get("stream_title", ""), context_before=anchor - lo, context_after=max(1.0, hi - anchor - 0.05),

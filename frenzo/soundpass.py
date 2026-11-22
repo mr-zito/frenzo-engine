@@ -91,7 +91,8 @@ def placed(cues, lib):
                      "head": round(head, 3), "L": round(L, 3), "gain_db": float(c.get("gain_db") or 0),
                      "stop": float(c.get("stop") or 0), "duck": bool(c.get("duck", c.get("kind") in ("voice", "music"))),
                      "fx": list(c.get("fx") or []), "caption": c.get("caption") or "", "role": c.get("role") or "",
-                     "mute_after": float(c.get("mute_after") or 0)})
+                     "mute_after": float(c.get("mute_after") or 0),
+                     "mute_game": float(c.get("mute_game") or 0)})
     return rows
 
 
@@ -109,6 +110,8 @@ def mix(game_wav, rows, out_wav, total, duck_db=-9.0, lufs=-14.0, game_volume=1.
             stops.append((max(0.0, r["t"] - r["stop"]), r["t"]))
         if r.get("mute_after"):                       # the game goes silent after it (staring at the camera)
             stops.append((r["t"] + 0.05, r["t"] + r["mute_after"]))
+        if r.get("mute_game"):                        # you asked to remove a sound of the stream: silent under this one
+            stops.append((max(0.0, r["starts"] - 0.15), r["starts"] + r["mute_game"]))
     dip = 10 ** (float(duck_db) / 20)
     level = f"(1-{1 - dip:.3f}*{windows(duck)})*(1-0.97*{windows(stops)})"
     graph = ";".join([f"[0:a]aresample=48000,aformat=channel_layouts=stereo,volume='{game_volume}*{level}':eval=frame[g]"]
