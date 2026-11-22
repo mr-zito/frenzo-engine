@@ -586,7 +586,7 @@ What happens (written by the page owner, who watched it: this is TRUE): {context
 What the streamer says in the clip: {said}
 Current title: {current}
 
-Write 4 different title options. Each must be TRUE to what happens AND funny: use the streamer's own \
+Write 5 different title options in different formats. Each must be TRUE to what happens AND funny: use the streamer's own \
 line, chat's joke, the irony or the twist, not a flat description. 3-10 words, sentence case, no emoji \
 in the title. Good: "Why did Kai shoot the dog?", "Kai's new girlfriend is a plane", "Bro said he can't \
 crash. Chat said 10 seconds.", "Big talk, then gets knocked out by a girl", "This GTA 6 NPC wanted smoke". \

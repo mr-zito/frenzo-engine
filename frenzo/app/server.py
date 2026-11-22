@@ -573,6 +573,12 @@ class ClipIndex:
             "user_context": meta.get("user_context") or "",
             "recording": os.path.splitext(str(meta.get("recording") or ""))[0],
             "post_texts": meta.get("post_texts") or {}, "links": meta.get("links") or {},
+            "title_options": [{"title": t.get("text", ""), "format": t.get("format", ""),
+                               "problems": t.get("problems") or [],
+                               "highlight": meta.get("highlight") if meta.get("highlight") and
+                               str(meta.get("highlight")).lower() in t.get("text", "").lower() else "",
+                               "emoji": meta.get("emoji") or ""}
+                              for t in ((meta.get("titles") or {}).get("candidates") or []) if t.get("text")],
             "start_in_recording": meta.get("start_in_recording"),
             "videos": videos, "main": main, "has_raw": "raw.mp4" in names, "has_thumb": "thumb.jpg" in names,
             "raw_offset": float(m.group(1)) if m else 0.0, "span": span, "jump_cuts": cuts,
@@ -1421,6 +1427,21 @@ def create_app(cfg_path):
             learning.title_fix(cfg(), _read_meta(folder) or {}, title, "idea" if body.get("idea") else "typed")
         except Exception as e:
             LOGS.add("learn", f"[{time.strftime('%H:%M:%S')}] [learn] couldn't save the title fix: {str(e)[:100]}")
+        def follow(m):                          # the post text follows the title on the video
+            olds = {x for x in (m.get("title"), m.get("title_bar"), m.get("heading")) if x}
+            m["title"] = title
+            for fields in (m.get("post_texts") or {}).values():
+                for k, v in list(fields.items()):
+                    if isinstance(v, str):
+                        for o in sorted(olds, key=len, reverse=True):
+                            v = v.replace(o, title)
+                        fields[k] = v
+        try:
+            _meta_edit(cid, follow)
+            m2 = _read_meta(folder) or {}
+            _write_caption_txt(folder, m2, campaign.for_login(cfg(), m2.get("login"), m2.get("platform")))
+        except Exception as e:
+            LOGS.add("app", f"[{time.strftime('%H:%M:%S')}] [app] couldn't update the post text: {str(e)[:100]}")
         job = jobs.add("recut", "New title: " + title[:48], args, target=cid)
         return jsonify({"ok": True, "job": job.id})
 

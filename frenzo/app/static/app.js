@@ -708,6 +708,10 @@ function openTitleEditor(idea) {
   S.ideaTitle = idea ? idea.title : null;          // learning: was the saved title one of Claude's ideas?
   $("#tTitle").value = src.title; $("#tHighlight").value = src.highlight || ""; setEmoji($("#tEmoji"), src.emoji);
   $("#tOld").classList.toggle("hidden", !c.old_title || c.old_title === c.title);
+  const opts = c.title_options || [];
+  $("#tOptions").classList.toggle("hidden", !opts.length);
+  $("#tOptionsList").innerHTML = opts.map((o, i) => `<button type="button" class="opt ${o.problems.length ? "bad" : ""}" data-opt="${i}">
+      <span>${esc(o.title)}</span><small>${o.problems.length ? "rejected: " + esc(o.problems.join("; ")) : esc(o.format || "")}${o.title === c.title ? " · on the video" : ""}</small></button>`).join("");
   $("#titleEditor").classList.remove("hidden");
   tPreview();
   $("#tTitle").focus();
@@ -716,6 +720,13 @@ function openTitleEditor(idea) {
 $("#dTitle").onclick = () => openTitleEditor();
 $("#dTitleEdit").onclick = () => openTitleEditor();
 $("#tCancel").onclick = () => $("#titleEditor").classList.add("hidden");
+$("#tOptionsList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-opt]"); if (!b) return;
+  const o = S.detail.title_options[+b.dataset.opt];
+  $("#tTitle").value = o.title; $("#tHighlight").value = o.highlight || ""; setEmoji($("#tEmoji"), o.emoji || S.detail.emoji);
+  S.ideaTitle = o.title;                          // learning: you picked one of Claude's titles
+  tPreview();
+});
 $("#tOld").onclick = () => {
   const c = S.detail;
   $("#tTitle").value = c.old_title || "";
