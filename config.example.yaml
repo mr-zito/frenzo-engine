@@ -166,7 +166,9 @@ render:
                                  # lap dance, twerking...). Warning only: the clip is still made
   reedit_obey_note: true        # "Re-edit with Claude" with a note: Claude's cut and sounds are used exactly (no dead-air
                                  # trim, margins, auto hook sounds, sound cap, title swap or 45 s limit after it)
-  game_avoid_cam: true          # the gameplay part never shows a cut-off piece of the stream's own webcam
+  reedit_keep_sounds: true      # a re-edit note that isn't about sound ("recenter the gameplay") keeps the clip's sounds
+  game_avoid_cam: true          # the gameplay part never shows a cut-off piece of the stream's own webcam (only when its
+                                 # real outline is known; a framing you set by hand or ask for in a note is never moved)
   title_fix_doubles: true       # doubled small words in the on-screen title are removed ("to to" -> "to")
   trim_dead_air: true            # cut quiet, wordless stretches longer than ~1.5 s
   sfx_types: ["sus"]             # (old sound mode only) which built-in sounds are allowed

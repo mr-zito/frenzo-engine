@@ -49,6 +49,8 @@ class Candidate:
     fallback: Optional[dict] = None    # decision to use if Claude can't answer
     user_context: str = ""             # what happens, written by you
     owner_note: str = ""               # re-edit: what you asked to change -> your note beats the automatic rules
+    keep_cues: Optional[list] = None   # re-edit note that isn't about sound: the clip's sounds (window time), kept
+    keep_framing: bool = False         # re-edit note about the framing: Claude's focus_x is used as it is
     learn_log: Optional[tuple] = None  # (decision, note, window start) for the learning decision log
     # crowd evidence (viewer clips, heatmap, chat replay) and the editing queue
     clips: list = field(default_factory=list)   # crowd.ViewerClip objects that landed on this moment
@@ -242,6 +244,8 @@ class Pipeline:
         # a re-edit with your note: Claude's cut and sounds follow it, so the automatic rules (dead-air trim, open on
         # the action, margins, auto sounds, sound cap, title swap, 45 s limit) don't change its answer afterwards
         obey = redo and bool((c.owner_note or "").strip()) and rcfg.get("reedit_obey_note", True)
+        if obey and c.keep_framing:                # "recenter" etc.: the webcam guard doesn't move Claude's framing
+            rcfg = dict(rcfg, game_avoid_cam=False)
         if not redo and not c.manual and not self._rate_ok(c.login):
             log("hourly clip limit reached (see max_per_hour in config), skipping moment", c.login)
             c.learn_log = (None, "not judged: hourly clip limit reached", None)
@@ -299,6 +303,10 @@ class Pipeline:
         d = dict(c.forced) if c.forced else self.judge.decide(ctx)
         c.learn_log = (d, None, win_start)
         c.judged = d
+        if obey and c.keep_cues is not None and isinstance(d, dict) and not str(d.get("reason", "")).startswith("skipped:"):
+            d = dict(d, cues=[dict(cu) for cu in c.keep_cues])   # your note isn't about sound: the sounds stay
+            c.judged = d
+            log(f"re-edit: your note doesn't mention sounds, so the clip keeps its {len(c.keep_cues)} sound(s)", c.login)
         if c.manual and not c.forced:
             reason = str(d.get("reason", ""))
             if reason.startswith("skipped:"):

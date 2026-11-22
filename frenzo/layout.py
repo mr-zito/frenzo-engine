@@ -149,6 +149,7 @@ def cam_from_face(face, frames, W, H):
     fx, fy, fw, fh = face
     if ov:
         ox, oy, ow, oh = ov
+        frame = {"x": round(ox / W, 4), "y": round(oy / H, 4), "w": round(ow / W, 4), "h": round(oh / H, 4)}
         oh_t = min(oh, fh * 3.0)          # viral clips crop tight: the face fills about half the band
         ow_t = min(ow, oh_t * CAM_ASPECT)
         cw, ch = ow_t, oh_t
@@ -161,7 +162,7 @@ def cam_from_face(face, frames, W, H):
             ch = ow / CAM_ASPECT
         x = min(max(ox, fx + fw / 2 - cw / 2), ox + ow - cw)
         y = min(max(oy, fy + fh / 2 - ch * 0.42), oy + oh - ch)
-        return {"x": x / W, "y": y / H, "w": cw / W, "h": ch / H, "how": "webcam frame"}
+        return {"x": x / W, "y": y / H, "w": cw / W, "h": ch / H, "how": "webcam frame", "frame": frame}
     cam = head_box_to_cam(fx / W, fy / H, fw / W, fh / H, W, H)
     cam["how"] = "around the face"
     return cam

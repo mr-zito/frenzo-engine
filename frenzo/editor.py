@@ -190,20 +190,40 @@ def cam_chain(cam, src_size, max_up):
                       f"[cbg][cfg]overlay=(W-w)/2:(H-h)/2,setsar=1")
 
 
-def game_x_limits(cam, src_size, zoom, gh):
-    """Where the gameplay band's crop may start (fractions of the source width), so it never includes the stream's
-    webcam box: a webcam on the left pushes the crop right of it, one on the right keeps it left of it. The detected
-    box is often a little smaller than the real overlay, so it is widened by a quarter of its width (at least 3%).
-    Returns (lo, hi); hi None = the right edge."""
+MAX_CAM_SHIFT = 0.12      # the webcam guard moves the gameplay framing at most this much (fraction of the width)
+
+
+def game_x_limits(cam, src_size, zoom, gh, fx=0.5):
+    """Where the gameplay band's crop may start (fractions of the source width), so it doesn't include the stream's
+    webcam box: a webcam on the left pushes the crop right of it, one on the right keeps it left of it.
+    Only when the webcam's real outline is known: cam["frame"] (the overlay's own border, found by the face scan),
+    a box drawn by hand, or a "webcam frame" crop (inside the overlay, so widened by a quarter, at least 3%).
+    A box drawn "around the face" is not the webcam's outline (it can be much wider): no guard then.
+    The framing never moves more than MAX_CAM_SHIFT from where it would be. Returns (lo, hi); hi None = right edge."""
     sw, sh = src_size if src_size and src_size[0] and src_size[1] else (16, 9)
     crop_w = (sh / sw) / max(zoom, 0.1) * W / gh            # crop width as a fraction of the source width
     if crop_w >= 1:
         return 0.0, None
-    pad = max(0.03, cam["w"] * 0.25)
-    left, right = cam["x"] - pad, cam["x"] + cam["w"] + pad
-    if cam["x"] + cam["w"] / 2 < 0.5:
-        return max(0.0, min(right, 1 - crop_w)), None
-    return 0.0, max(0.0, min(left - crop_w, 1 - crop_w))
+    how = str(cam.get("how") or "")
+    fr = cam.get("frame") if isinstance(cam.get("frame"), dict) else None
+    try:
+        if fr:
+            box, pad = {k: float(fr[k]) for k in ("x", "y", "w", "h")}, 0.01
+        elif "by hand" in how:
+            box, pad = {k: float(cam[k]) for k in ("x", "y", "w", "h")}, 0.01
+        elif "webcam frame" in how:
+            box = {k: float(cam[k]) for k in ("x", "y", "w", "h")}
+            pad = max(0.03, box["w"] * 0.25)
+        else:
+            return 0.0, None
+    except (KeyError, TypeError, ValueError):
+        return 0.0, None
+    start = min(max(fx - crop_w / 2, 0.0), 1 - crop_w)         # where the framing would start without the guard
+    if box["x"] + box["w"] / 2 < 0.5:
+        lo = min(box["x"] + box["w"] + pad, 1 - crop_w, start + MAX_CAM_SHIFT)
+        return max(0.0, lo), None
+    hi = max(box["x"] - pad - crop_w, 0.0, start - MAX_CAM_SHIFT)
+    return 0.0, min(hi, 1 - crop_w)
 
 
 def game_x_expr(fx, lo, hi):
@@ -219,9 +239,9 @@ def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, ho
     webcam is enlarged (cam_max_up). avoid_cam: the gameplay band never shows the stream's own webcam box."""
     fx = min(max(focus_x, 0.0), 1.0)
     if layout == "reel" and cam:
-        cam = {k: float(cam[k]) for k in ("x", "y", "w", "h")}
         gh = REEL_GAME_H
-        lo_x, hi_x = game_x_limits(cam, src_size, zoom, gh) if avoid_cam else (0.0, None)
+        lo_x, hi_x = game_x_limits(cam, src_size, zoom, gh, fx) if avoid_cam else (0.0, None)
+        cam = {k: float(cam[k]) for k in ("x", "y", "w", "h")}
         crop_cam = f"crop=w=iw*{cam['w']:.4f}:h=ih*{cam['h']:.4f}:x=iw*{cam['x']:.4f}:y=ih*{cam['y']:.4f}"
         full = ""
         if cam_only_until and cam_only_until > 0.2:

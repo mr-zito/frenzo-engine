@@ -103,6 +103,8 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
     scfg = next((s for s in cfg["streamers"] if s["login"] == login), {"login": login, "tags": []})
     camp = campaign.of(scfg)                       # campaign rules: no captions / no sus sound if it says so
     rcfg = campaign.render_cfg(rcfg, camp)
+    if over.get("focus") is not None:              # framing you set by hand: the webcam guard doesn't move it
+        rcfg = dict(rcfg, game_avoid_cam=False)
     pipe.judge.last_player_x = None
     pipe.__dict__.get("_cams", {}).clear()
     cam = scfg.get("facecam")
@@ -273,6 +275,30 @@ def _out_to_src(pieces, speeds, t):
     return pieces[-1][1] if pieces else t
 
 
+SOUND_WORDS = (r"sound|sfx|\beffect|audio|music|song|noise|boom|fa+h|bruh|vine|bass|riser|whoosh|swoosh|ding|bell|"
+               r"\bmute|silen|quiet|loud|volume|\bcue|meme|bua|wa-?wa|scream|laugh track|bleep")
+FRAMING_WORDS = r"cent(er|re)|frame|framing|crop|zoom|gameplay|webcam|\bcam\b"
+
+
+def note_about(note, pattern, extra=()):
+    low = (note or "").lower()
+    return bool(re.search(pattern, low)) or any(x and (x in low or x.replace("-", " ") in low) for x in extra)
+
+
+def _cues_in_window(meta, offset, lo):
+    """The clip's sound cues with t in the re-edit window's seconds (what Claude's cues use)."""
+    dur = float(meta.get("duration") or 0)
+    pieces = [(float(a), float(b)) for a, b in (meta.get("jump_cuts") or [[0, dur]])]
+    speeds = [float(x) for x in (meta.get("piece_speeds") or [])]
+    if len(speeds) != len(pieces):
+        speeds = [1.0] * len(pieces)
+    out = []
+    for cu in ((meta.get("sound") or {}).get("cues")) or []:
+        if cu.get("sfx") and cu.get("t") is not None:
+            out.append(dict(cu, t=round(offset + _out_to_src(pieces, speeds, float(cu["t"])) - lo, 3)))
+    return out
+
+
 def _owner_block(meta, offset, lo, win_len):
     """For a re-edit note: the CURRENT clip as the owner watches it (its pieces and sounds), in both timelines,
     so 'at second 11', 'move the faah 1 s later', 'remove the sounds' and 'keep the end' mean exactly that."""
@@ -335,6 +361,14 @@ def _reedit_with_claude(pipe, cfg, dirpath, meta, login, note=None, span=None, c
         where += (f" (the old cut went from {old_a:.0f}s to {old_b:.0f}s: it starts before and/or ends after the "
                   f"window you chose, so only the part inside the window is available)")
     owner = _owner_block(meta, offset, lo, win_len) if note and note.strip() else ""
+    keep_cues, keep_framing = None, False
+    if note and note.strip() and cfg["render"].get("reedit_keep_sounds", True):
+        from . import soundlib
+        lib = soundlib.find_library(cfg["render"])
+        ids = list(soundlib.load(lib)) if lib is not None else []
+        if not note_about(note, SOUND_WORDS, ids):
+            keep_cues = _cues_in_window(meta, offset, lo)
+        keep_framing = note_about(note, FRAMING_WORDS)
     c = Candidate(
         login=login, display_name=meta.get("streamer") or login, rec_path=raw, anchor=anchor, owner_note=note or "",
         source=(f"RE-EDIT of a clip we already made: the old cut was {where} and its old title was "
@@ -350,7 +384,7 @@ def _reedit_with_claude(pipe, cfg, dirpath, meta, login, note=None, span=None, c
                 + (". The owner chose this window by hand: use the moment inside it" if span else "")),
         streamer_cfg=scfg, game=meta.get("game") or cfg["game"]["name"], platform=meta.get("platform", "twitch"),
         stream_title=meta.get("stream_title", ""), context_before=anchor - lo, context_after=max(1.0, hi - anchor - 0.05),
-        out_folder=dirpath, keep_meta=keep,
+        out_folder=dirpath, keep_meta=keep, keep_cues=keep_cues, keep_framing=keep_framing,
     )
     pipe.judge.last_player_x = None
     pipe.__dict__.get("_cams", {}).clear()
