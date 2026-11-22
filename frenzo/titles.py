@@ -39,6 +39,14 @@ def problems(title, what_happens=""):
     return out
 
 
+_SMALL = r"to|the|a|an|of|in|on|at|is|for|and|with|his|her|by|from|it"
+
+
+def drop_doubled(title):
+    """'tries to to rob' -> 'tries to rob'. Only small words: 'almost almost' or 'no no no' are meant."""
+    return re.sub(rf"\b({_SMALL})(\s+\1\b)+", r"\1", title or "", flags=re.I)
+
+
 def _quoted(text, pos):
     """A spoiler word inside the streamer's quoted words is fine ('Bro said "I won't crash"')."""
     before = text[:pos]

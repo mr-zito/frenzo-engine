@@ -463,6 +463,12 @@ class Pipeline:
                     d["highlight"] = None
                 if title_rep.get("note"):
                     log("title: " + title_rep["note"], c.login)
+        for k in ("title_bar", "heading"):
+            if d.get(k) and rcfg.get("title_fix_doubles", True):
+                fixed = titles.drop_doubled(d[k])
+                if fixed != d[k]:
+                    log(f"title: doubled word removed ({d[k]!r} -> {fixed!r})", c.login)
+                    d[k] = fixed
 
         sfx_list, cues_out, fx_events, lib = [], [], [], None
         if rcfg.get("sound_effects", True) and rcfg.get("sound_library", True):

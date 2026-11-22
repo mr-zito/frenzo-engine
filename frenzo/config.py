@@ -153,6 +153,8 @@ DEFAULTS = {
         "five_titles": True,
         "risky_warning": True,          # red "risky for TikTok/Instagram" badge on sexual-content clips (warning only)
         "reedit_obey_note": True,      # re-edit with your note: no automatic trims / sounds / cap / title swap after it
+        "game_avoid_cam": True,        # the gameplay band never shows the stream's own webcam box
+        "title_fix_doubles": True,     # 'tries to to rob' -> 'tries to rob' in the on-screen title
     },
     "storage": {
         "output_dir": "clips",

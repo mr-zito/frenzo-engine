@@ -190,15 +190,38 @@ def cam_chain(cam, src_size, max_up):
                       f"[cbg][cfg]overlay=(W-w)/2:(H-h)/2,setsar=1")
 
 
+def game_x_limits(cam, src_size, zoom, gh):
+    """Where the gameplay band's crop may start (fractions of the source width), so it never includes the stream's
+    webcam box: a webcam on the left pushes the crop right of it, one on the right keeps it left of it. The detected
+    box is often a little smaller than the real overlay, so it is widened by a quarter of its width (at least 3%).
+    Returns (lo, hi); hi None = the right edge."""
+    sw, sh = src_size if src_size and src_size[0] and src_size[1] else (16, 9)
+    crop_w = (sh / sw) / max(zoom, 0.1) * W / gh            # crop width as a fraction of the source width
+    if crop_w >= 1:
+        return 0.0, None
+    pad = max(0.03, cam["w"] * 0.25)
+    left, right = cam["x"] - pad, cam["x"] + cam["w"] + pad
+    if cam["x"] + cam["w"] / 2 < 0.5:
+        return max(0.0, min(right, 1 - crop_w)), None
+    return 0.0, max(0.0, min(left - crop_w, 1 - crop_w))
+
+
+def game_x_expr(fx, lo, hi):
+    hi_e = "iw-ow" if hi is None else f"min(iw*{hi:.4f},iw-ow)"
+    lo_e = "0" if not lo else f"min(iw*{lo:.4f},{hi_e})"
+    return f"clip(iw*{fx:.4f}-ow/2,{lo_e},{hi_e})"
+
+
 def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, hook_zoom=False, cam_only_until=0.0,
-                 src_size=None, cam_max_up=2.2):
+                 src_size=None, cam_max_up=2.2, avoid_cam=True):
     """cam_only_until: during the first N seconds only the webcam is shown, full screen (the reaction-first hook:
     the viewer sees the streamer react, not what happened). src_size: the source (w, h), to limit how much the
-    webcam is enlarged (cam_max_up)."""
+    webcam is enlarged (cam_max_up). avoid_cam: the gameplay band never shows the stream's own webcam box."""
     fx = min(max(focus_x, 0.0), 1.0)
     if layout == "reel" and cam:
         cam = {k: float(cam[k]) for k in ("x", "y", "w", "h")}
         gh = REEL_GAME_H
+        lo_x, hi_x = game_x_limits(cam, src_size, zoom, gh) if avoid_cam else (0.0, None)
         crop_cam = f"crop=w=iw*{cam['w']:.4f}:h=ih*{cam['h']:.4f}:x=iw*{cam['x']:.4f}:y=ih*{cam['y']:.4f}"
         full = ""
         if cam_only_until and cam_only_until > 0.2:
@@ -210,7 +233,7 @@ def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, ho
         out = (
             f"{src}split={3 if full else 2}[s1][s2]{'[s3]' if full else ''};"
             + cam_part +
-            f"[s2]crop=w=ih/{zoom}*{W}/{gh}:h=ih/{zoom}:x='clip(iw*{fx:.4f}-ow/2,0,iw-ow)':y=(ih-oh)/2,"
+            f"[s2]crop=w=ih/{zoom}*{W}/{gh}:h=ih/{zoom}:x='{game_x_expr(fx, lo_x, hi_x)}':y=(ih-oh)/2,"
             f"scale={W}:{gh}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1{punch_filter(fx_events, W, gh, hook_zoom)}[game];"
             + full
             + ("[cam][game]vstack=inputs=2[vst];[vst][camfull]overlay=0:0:enable='lt(t," + f"{cam_only_until:.3f}" + ")'[v0]"
@@ -294,7 +317,8 @@ def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, 
     graph += ";" + video_filter(layout, cam, focus_x, rcfg.get("game_zoom", 1.0), src="[vcat]",
                                 fx_events=fx_events if rcfg.get("punch_fx", True) else None, hook_zoom=hook_zoom,
                                 cam_only_until=cam_only_until, src_size=_src_size(rec),
-                                cam_max_up=float(rcfg.get("cam_max_upscale", 2.2) or 0))
+                                cam_max_up=float(rcfg.get("cam_max_upscale", 2.2) or 0),
+                                avoid_cam=bool(rcfg.get("game_avoid_cam", True)))
     v0 = "[v0]"
     if rcfg.get("censor_regions"):                 # nudity: pixelated spots (under the captions and the title)
         from .censor import filter_graph
