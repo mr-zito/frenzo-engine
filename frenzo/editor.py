@@ -168,9 +168,33 @@ def punch_filter(fx_events, w, h, hook_zoom=False, band="game"):
     return out
 
 
-def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, hook_zoom=False, cam_only_until=0.0):
+def cam_chain(cam, src_size, max_up):
+    """The webcam band. A small webcam box (e.g. 364x216 px) blown up 3x to fill 1080x640 looks soft: it is
+    enlarged at most max_up times, and if that doesn't fill the band the sharp webcam sits in the middle over a
+    blurred, darkened copy of itself. Returns the filter chain from the source to the band (ends without a label)."""
+    crop_cam = f"crop=w=iw*{cam['w']:.4f}:h=ih*{cam['h']:.4f}:x=iw*{cam['x']:.4f}:y=ih*{cam['y']:.4f}"
+    fill = (f"scale={W}:{REEL_CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{REEL_CAM_H},"
+            f"unsharp=5:5:0.7:5:5:0,setsar=1")
+    if not src_size or not max_up:
+        return crop_cam + "," + fill, None
+    cw, ch = cam["w"] * src_size[0], cam["h"] * src_size[1]
+    cover = max(W / max(cw, 1), REEL_CAM_H / max(ch, 1))
+    if cover <= max_up:
+        return crop_cam + "," + fill, None
+    fw, fh = min(W, int(cw * max_up) // 2 * 2), min(REEL_CAM_H, int(ch * max_up) // 2 * 2)
+    return crop_cam, (f"split=2[cbg0][cfg0];"
+                      f"[cbg0]scale={W}:{REEL_CAM_H}:force_original_aspect_ratio=increase:flags=bicubic,"
+                      f"crop={W}:{REEL_CAM_H},boxblur=18:2,eq=brightness=-0.12,setsar=1[cbg];"
+                      f"[cfg0]scale={int(cw * max_up) // 2 * 2}:{int(ch * max_up) // 2 * 2}:flags=lanczos,"
+                      f"crop={fw}:{fh},unsharp=5:5:0.9:5:5:0,setsar=1[cfg];"
+                      f"[cbg][cfg]overlay=(W-w)/2:(H-h)/2,setsar=1")
+
+
+def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, hook_zoom=False, cam_only_until=0.0,
+                 src_size=None, cam_max_up=2.2):
     """cam_only_until: during the first N seconds only the webcam is shown, full screen (the reaction-first hook:
-    the viewer sees the streamer react, not what happened)."""
+    the viewer sees the streamer react, not what happened). src_size: the source (w, h), to limit how much the
+    webcam is enlarged (cam_max_up)."""
     fx = min(max(focus_x, 0.0), 1.0)
     if layout == "reel" and cam:
         cam = {k: float(cam[k]) for k in ("x", "y", "w", "h")}
@@ -180,11 +204,12 @@ def video_filter(layout, cam, focus_x, zoom=1.0, src="[0:v]", fx_events=None, ho
         if cam_only_until and cam_only_until > 0.2:
             full = (f"[s3]{crop_cam},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},"
                     f"unsharp=5:5:0.7:5:5:0,setsar=1[camfull];")
+        first, rest = cam_chain(cam, src_size, cam_max_up)
+        cam_part = (f"[s1]{first},{rest}{punch_filter(fx_events, W, REEL_CAM_H, band='cam')}[cam];" if rest else
+                    f"[s1]{first}{punch_filter(fx_events, W, REEL_CAM_H, band='cam')}[cam];")
         out = (
             f"{src}split={3 if full else 2}[s1][s2]{'[s3]' if full else ''};"
-            f"[s1]{crop_cam},"
-            f"scale={W}:{REEL_CAM_H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{REEL_CAM_H},"
-            f"unsharp=5:5:0.7:5:5:0,setsar=1{punch_filter(fx_events, W, REEL_CAM_H, band='cam')}[cam];"
+            + cam_part +
             f"[s2]crop=w=ih/{zoom}*{W}/{gh}:h=ih/{zoom}:x='clip(iw*{fx:.4f}-ow/2,0,iw-ow)':y=(ih-oh)/2,"
             f"scale={W}:{gh}:flags=lanczos,unsharp=5:5:0.5:5:5:0,setsar=1{punch_filter(fx_events, W, gh, hook_zoom)}[game];"
             + full
@@ -221,6 +246,14 @@ def _fontsdir(out_dir):
         return "" if ":" in rel else f":fontsdir={rel}"
     except ValueError:
         return ""
+
+
+def _src_size(path):
+    try:
+        from .layout import _probe_size
+        return _probe_size(path)
+    except Exception:
+        return None
 
 
 def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, raw_pad=60,
@@ -260,7 +293,8 @@ def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, 
     graph += ";" + "".join(f"[vp{i}][ap{i}]" for i in range(k)) + f"concat=n={k}:v=1:a=1[vcat][acat]"
     graph += ";" + video_filter(layout, cam, focus_x, rcfg.get("game_zoom", 1.0), src="[vcat]",
                                 fx_events=fx_events if rcfg.get("punch_fx", True) else None, hook_zoom=hook_zoom,
-                                cam_only_until=cam_only_until)
+                                cam_only_until=cam_only_until, src_size=_src_size(rec),
+                                cam_max_up=float(rcfg.get("cam_max_upscale", 2.2) or 0))
     v0 = "[v0]"
     if rcfg.get("censor_regions"):                 # nudity: pixelated spots (under the captions and the title)
         from .censor import filter_graph
@@ -385,7 +419,8 @@ def render(rec, start, dur, out_dir, ass_text, layout, cam, focus_x, sfx, rcfg, 
             run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{raw_start:.2f}",
                  "-t", f"{raw_dur:.2f}", "-i", rec, "-map", "0:v:0", "-map", "0:a:0?",
                  "-af", "aresample=48000:async=1:first_pts=0", "-fps_mode", "cfr"]
-                + video_args(rcfg, on_gpu, crf=27 if on_gpu else 23, preset="veryfast")   # raw.mp4: editing source
+                # raw.mp4 is the source of every later re-edit: kept close to the clip's quality (render.raw_crf)
+                + video_args(rcfg, on_gpu, crf=int(rcfg.get("raw_crf", 20)), preset="veryfast")
                 + ["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "raw.mp4"],
                 cwd=out_dir)
         try:

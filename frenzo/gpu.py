@@ -75,9 +75,14 @@ def video_args(rcfg, gpu, crf=None, preset=None):
     """ffmpeg video encoder options: NVENC (GPU) or libx264 (CPU), same quality target."""
     crf = int(rcfg.get("crf", 18) if crf is None else crf)
     if gpu:
-        # constant-quality VBR. Measured on this PC: cq = crf + 8..9 gives about the same file size and the same look
-        # (SSIM 0.993 vs libx264) as libx264 at that crf, 2-3x faster and without using the CPU for encoding
-        return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", str(crf + 9), "-b:v", "0",
-                "-maxrate", "25M", "-bufsize", "50M", "-spatial-aq", "1", "-profile:v", "high"]
+        # constant-quality VBR, tuned for quality (the platforms re-compress, so the upload must be clean):
+        # cq = crf + 5, slower preset p6, 2-pass inside a frame (qres), 32-frame look-ahead, spatial + temporal AQ,
+        # B-frames as references. Measured on this PC (RTX 4060, 15 s of 1080x1920 60 fps): SSIM 0.9972 vs 0.9960 for
+        # the old p4 / cq crf+9, 15.5 vs 10 Mbps, 5 s vs 3 s to encode. render.nvenc_cq_offset changes the +5.
+        off = int(rcfg.get("nvenc_cq_offset", 5))
+        return ["-c:v", "h264_nvenc", "-preset", "p6", "-tune", "hq", "-multipass", "qres", "-rc", "vbr",
+                "-cq", str(crf + off), "-b:v", "0", "-maxrate", "40M", "-bufsize", "80M", "-rc-lookahead", "32",
+                "-spatial-aq", "1", "-temporal-aq", "1", "-aq-strength", "8", "-bf", "3", "-b_ref_mode", "middle",
+                "-profile:v", "high"]
     return ["-c:v", "libx264", "-preset", preset or rcfg.get("preset", "veryfast"), "-crf", str(crf),
             "-profile:v", "high", "-x264-params", "aq-mode=3"]

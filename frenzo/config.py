@@ -117,6 +117,9 @@ DEFAULTS = {
         "sound_library_path": "",       # empty = the installed gta-reel-sound-studio skill's gta_sfx_library
         "sound_check": True,            # run check_reel.py on every clip, auto-fix once
         "sound_safe_mode": True,        # no sounds tagged music / explicit unless the campaign allows them
+        "cam_max_upscale": 2.2,         # the webcam is enlarged at most this much (0 = always fill the band)
+        "raw_crf": 20,                  # quality of raw.mp4, the source of re-edits (lower = better, bigger)
+        "nvenc_cq_offset": 5,           # GPU quality = crf + this (lower = better, bigger files)
         "sound_no_repeat": 3,           # prefer not to reuse sounds from the account's last N clips
         "sound_max_per_clip": 3,        # hard cap: never more sound effects than this in one clip
         "hook_types": ["action", "tension", "quote"],   # + reaction_first / cold_open = the rewind styles
