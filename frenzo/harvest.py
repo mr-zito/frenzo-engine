@@ -267,7 +267,9 @@ def harvest(cfg, login, since=None, last_stream=False, t_from=None, t_to=None, t
                               "vod_id": m.vod_id, "span": [round(m.start, 1), round(m.end, 1)]} for m in moments]
     if dry_run or not moments:
         return []
-    pipe = Pipeline(cfg, Transcriber(cfg["transcription"]), ClipJudge(cfg))
+    hcfg = dict(cfg, clips=dict(cfg["clips"], max_per_hour_total=0,      # hourly caps are for live mode only
+                                max_per_hour_per_streamer=10 ** 6))
+    pipe = Pipeline(hcfg, Transcriber(cfg["transcription"]), ClipJudge(cfg))
     det = cfg["detection"]
     work = tempfile.mkdtemp(prefix="frenzo_harvest_")
     done = []
@@ -291,7 +293,9 @@ def harvest(cfg, login, since=None, last_stream=False, t_from=None, t_to=None, t
             if source == "clip":                 # the clip itself: the whole file is the window
                 c.context_before, c.context_after = c.anchor, 2.0
             pipe.process(c)
-            mark_done(cfg, [x.id for x in m.clips])
+            looked = c.judged is not None and not str(c.judged.get("reason", "")).startswith(("skipped:", "backup rule"))
+            if looked or c.folder:                 # only moments really looked at (not skipped by a limit)
+                mark_done(cfg, [x.id for x in m.clips])
             if c.folder:
                 try:
                     mp = os.path.join(c.folder, "meta.json")
