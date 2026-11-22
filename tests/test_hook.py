@@ -88,7 +88,7 @@ class Hook(unittest.TestCase):
         def fix(s, lib):
             return s if s in lib_ids else None
         cues, notes = hook.ensure_opening_sound([{"t": 5.0, "sfx": "x"}], "cold_open", 1.4, None, fix)
-        self.assertEqual([c["t"] for c in cues], [0.35, 1.4, 5.0])
+        self.assertEqual([c["t"] for c in cues], [0.4, 1.4, 5.0])
         self.assertEqual(cues[0]["fx"], ["zoom"])                        # the audio hook punches the picture too
         self.assertEqual(cues[1]["sfx"], "record-scratch")
         self.assertEqual(len(notes), 2)
@@ -97,9 +97,12 @@ class Hook(unittest.TestCase):
         self.assertEqual(cues[0]["fx"], ["zoom"])                        # Claude's own opening sound gets the punch
         cues, _ = hook.ensure_opening_sound([], "action", 0, None, fix, prefer="tape-rewind")
         self.assertEqual(cues[0]["sfx"], "whoosh-fast")                  # not an impact/whoosh: not an opener
+        cues, notes = hook.ensure_opening_sound([], "action", 0, None, fix, add=False)
+        self.assertEqual(cues, [])                                       # opens loud already: nothing added
+        self.assertIn("loud", notes[0])
         cues, _ = hook.ensure_opening_sound([{"t": 9.0, "sfx": "whoosh-fast"}], "action", 0, None,
                                             lambda s, lib: s if s in {"whoosh-fast", "boom"} else None)
-        self.assertEqual([c["sfx"] for c in cues], ["boom", "whoosh-fast"])   # never the same sound twice
+        self.assertEqual([c["sfx"] for c in cues], ["boom", "whoosh-fast"])   # never the same sound twice (impact first)
 
 
 class Captions(unittest.TestCase):

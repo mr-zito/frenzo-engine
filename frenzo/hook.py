@@ -13,7 +13,7 @@ DEFAULT_TYPES = ("action", "tension", "quote")      # render.hook_types (the rew
 DEFAULT_SFX = {"cold_open": ["record-scratch", "tape-rewind"], "reaction_first": ["record-scratch", "whoosh-fast"],
                "tension": ["riser-air"], "quote": ["vine-boom-slowed", "whoosh-fast"]}
 # the sound that opens a clip (the audio hook): an impact or a whoosh, never a slow build
-OPEN_SFX = ["whoosh-fast", "boom", "vine-boom-slowed", "taco-bell-bong", "flashbang-loud", "deep-boom", "whoosh"]
+OPEN_SFX = ["vine-boom-slowed", "boom", "flashbang-loud", "deep-boom", "whoosh-fast", "whoosh"]
 
 
 def mapper(segments, speeds=None, offset=0.0):
@@ -123,7 +123,7 @@ def apply_slowmo(segs, slow, max_len=2.0):
     return out, sp
 
 
-def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None, cap=0, prefer=None):
+def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None, cap=0, prefer=None, add=True):
     """The audio hook: a sound lands in the first second (with a punch-in on the picture: the visual hook).
     prefer: Claude's hook_sfx. A cold open / reaction-first (if you turned them on) gets its sound on the cut back.
     Returns (cues, notes)."""
@@ -143,14 +143,16 @@ def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None, c
         for c in first:
             if "zoom" not in (c.get("fx") or []) and not set(c.get("fx") or []) & {"slow_zoom", "zoom_hold"}:
                 c["fx"] = list(c.get("fx") or []) + ["zoom"]
+    elif not add:                                    # the clip already opens loud (the streamer yelling): that IS the hook
+        notes.append("hook: the clip opens on a loud reaction, no sound added")
     else:
         used = {c["sfx"] for c in cues}              # never the same sound twice in a clip
         choices = ([prefer] if prefer in OPEN_SFX else []) + OPEN_SFX
         sid = next((fix_id(s, lib) for s in choices if s and fix_id(s, lib) and fix_id(s, lib) not in used), None)
         if sid:
             # whooshes and booms land by their peak (the sound kit's rule); 0.35 s leaves room for the first frames
-            cues.append({"t": 0.35, "sfx": sid, "role": "support", "align": "peak", "gain_db": -3.0, "stop": 0.0,
+            cues.append({"t": 0.4, "sfx": sid, "role": "support", "align": "peak", "gain_db": 0.0, "stop": 0.0,
                          "duck": False, "kind": "whoosh" if "whoosh" in sid else "hit", "max_len": 1.5, "fx": ["zoom"],
                          "auto": True})
-            notes.append(f"hook: {sid} + punch-in at 0.35s")
+            notes.append(f"hook: {sid} + punch-in at 0.4s")
     return sorted(cues, key=lambda c: c["t"]), notes

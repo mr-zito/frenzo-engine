@@ -137,7 +137,10 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
         lib = soundlib.find_library(rcfg)
         if lib is not None:
             to_new = viral.mapper([(float(a), float(b)) for a, b in segs] if segs else [(0.0, dur)])
+            allowed = set(soundlib.guide(rcfg, lib))       # sounds you removed from your list are dropped
             for cu in cues_in_raw(meta):
+                if allowed and cu.get("sfx") not in allowed:
+                    continue
                 t = to_new(cu["raw_t"] - offset)
                 if t is not None and 0 <= t < dur:
                     lib_cues.append({k: v for k, v in dict(cu, t=round(t, 3)).items() if k != "raw_t"})
@@ -169,7 +172,12 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
     if not titlecard.render_title(viral.censor(title), highlight, emoji, title_png, size=rcfg.get("title_size", 58)):
         title_png = None
     callouts = [c for c in (meta.get("callouts") or []) if isinstance(c, dict)] if segs else []
-    ass = viral.build_ass(words, callouts, dur, rcfg, lay, editor.REEL_CAM_H)
+    if rcfg.get("caption_style", "bold") == "bold" and lay in ("reel", "focus"):     # the current caption style
+        ass = viral.build_ass_bold(words, callouts, dur, rcfg, lay, editor.REEL_CAM_H,
+                                   punch_words=meta.get("punch_words") if isinstance(meta.get("punch_words"), list) else None,
+                                   title=title)
+    else:
+        ass = viral.build_ass(words, callouts, dur, rcfg, lay, editor.REEL_CAM_H)
 
     for old in os.listdir(dirpath):
         if old.startswith("clip") and (old.endswith(".mp4") or old.endswith(".cues.json")):

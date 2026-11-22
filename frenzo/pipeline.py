@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import os
 import shutil
+import statistics
 import threading
 import time
 from dataclasses import dataclass, field
@@ -472,7 +473,11 @@ class Pipeline:
                                      "gain_db": -3.0, "stop": 0.0, "duck": False, "kind": "transition", "max_len": 1.5,
                                      "fx": [], "auto": True})
                 cap = int(rcfg.get("sound_max_per_clip", 0) or 0) if soundlib.guide(rcfg, lib) else 0
-                cues_out, notes = hook_mod.ensure_opening_sound(cues_out, ht, hook_len, lib, fid, cap=0, prefer=pref)
+                # opens loud already (a yell, a crash)? then the picture + that sound are the hook: add nothing
+                a0 = int(pieces[0][0]) if pieces else 0
+                opens_loud = bool(loud) and max(loud[a0:a0 + 2] or [-99]) >= statistics.median(loud) + 4
+                cues_out, notes = hook_mod.ensure_opening_sound(cues_out, ht, hook_len, lib, fid, cap=0, prefer=pref,
+                                                                add=not opens_loud)
                 hook_notes += notes
                 for cu in cues_out:                 # sounds added by code get their effect from your list too
                     g = soundlib.guide(rcfg, lib).get(cu["sfx"]) if cu.get("auto") else None

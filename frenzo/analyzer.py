@@ -61,6 +61,11 @@ def _cuda_libs_missing():
         return True
 
 
+# lines Whisper is known to invent on silence or music (never real streamer speech in a GTA clip)
+HALLUCINATIONS = ("thanks for watching", "thank you for watching", "please subscribe", "subscribe to my channel",
+                  "amara.org", "subtitles by", "transcribed by", "see you in the next video", "like and subscribe")
+
+
 class Transcriber:
     """Speech-to-text with word timings (faster-whisper). Loaded once, shared by workers."""
 
@@ -107,15 +112,22 @@ class Transcriber:
                 self._load()
             if not self.available or len(audio) < RATE:
                 return [], None
+            # no voice-activity filter by default: it threw away a streamer YELLING over loud game music (0 words
+            # in 39 s of Kai). Instead, segments that look like silence hallucinations are dropped below.
             segments, info = self.model.transcribe(
                 audio,
                 language=self.cfg.get("language"),
                 word_timestamps=True,
-                vad_filter=True,
-                beam_size=1,
+                vad_filter=bool(self.cfg.get("vad", False)),
+                beam_size=int(self.cfg.get("beam_size", 5)),
+                condition_on_previous_text=False,
             )
             words = []
             for seg in segments:
+                text = (seg.text or "").strip().lower()
+                if (seg.no_speech_prob > 0.6 and seg.avg_logprob < -0.7) or any(
+                        h in text for h in HALLUCINATIONS):
+                    continue                             # whisper "hearing" words in silence / music
                 for w in seg.words or []:
                     text = w.word.strip()
                     if text:

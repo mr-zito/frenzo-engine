@@ -138,7 +138,6 @@ DEFAULTS = {
                                                   "silence", "effect": "silence_after"},
             {"id": "boom", "when": "an impact, or a sus moment"},
             {"id": "flashbang-loud", "when": "a big impact, like dying to the police", "effect": "flash"},
-            {"id": "taco-bell-bong", "when": "a funny impact"},
             {"id": "vine-boom-slowed", "when": "a dramatic impact or reveal"},
             {"id": "cash-register", "when": "ONLY when getting cash"},
             {"id": "apple-notification", "when": "the character gets a notification or message on the in-game phone"},
