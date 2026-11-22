@@ -133,6 +133,11 @@ def map_cues(cues, to_out, out_dur, lib, camp, rcfg, repeat=False):
                "dur": round(min(max_len, float(entries[sid].get("duration") or 1.0)), 3)}
         if mute_game:
             row["mute_game"] = round(mute_game, 2)
+        try:                                       # the sound check's earlier timing fix stays with the sound
+            if cu.get("nudge"):
+                row["nudge"] = round(max(-0.5, min(0.5, float(cu["nudge"]))), 3)
+        except (TypeError, ValueError):
+            pass
         out.append(row)
     cap = int(rcfg.get("sound_max_per_clip", 0) or 0) if guide else 0
     if cap and len(out) > cap:                      # Claude lists the most important first: keep those
@@ -159,9 +164,11 @@ def freeze_cue(cues, rcfg, lib, segs):
     return None
 
 
-def sound_check(folder, files, cues, rows, lib, game_wav, out_dur, rcfg, login):
+def sound_check(folder, files, cues, rows, lib, game_wav, out_dur, rcfg, login, fix=True):
     """check_reel.py on the clean clip; one automatic fix (mix again, put the sound into every version with
-    -c:v copy); still failing -> needs review (the report stays in sound_qa/)."""
+    -c:v copy); still failing -> needs review (the report stays in sound_qa/).
+    fix=False (your own renders: new framing, longer cut, new title): only checked, never changed again; the
+    clip's cues already carry the fix from when it was made, so it sounds exactly as before."""
     from . import soundlib, soundpass
     clip = os.path.join(folder, files[0])
     soundpass.write_cues_json(clip, rows, out_dur)
@@ -173,7 +180,7 @@ def sound_check(folder, files, cues, rows, lib, game_wav, out_dur, rcfg, login):
     qa_dir = os.path.join(folder, "sound_qa")
     qa = soundpass.check(clip, lib, qa_dir)
     bad = soundpass.failing(qa)
-    if bad:
+    if bad and fix:
         new_cues, changes = soundpass.autofix(cues, qa)
         log("sound check: " + "; ".join(bad[:4]) + (" -> fixing: " + "; ".join(changes[:4]) if changes else ""), login)
         if changes:
@@ -194,7 +201,8 @@ def sound_check(folder, files, cues, rows, lib, game_wav, out_dur, rcfg, login):
                       "issues": qa.get("issues") or []}
     if bad:
         meta["needs_review"] = True
-        log("sound check still failing after one fix: clip marked NEEDS REVIEW (" + "; ".join(bad[:3]) + ")", login)
+        log(("sound check still failing after one fix" if fix else "sound check (your render: sounds kept exactly as "
+             "they were)") + ": clip marked NEEDS REVIEW (" + "; ".join(bad[:3]) + ")", login)
     return meta
 
 

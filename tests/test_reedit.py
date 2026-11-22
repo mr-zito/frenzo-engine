@@ -89,3 +89,16 @@ class OwnerSounds(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NudgeKept(unittest.TestCase):
+    def test_map_cues_keeps_nudge(self):
+        from frenzo import pipeline, soundlib
+        from frenzo.config import load_config
+        rcfg = dict(load_config("config.yaml")["render"])
+        lib = soundlib.find_library(rcfg)
+        if lib is None:
+            self.skipTest("no sound library")
+        sid = next(iter(soundlib.guide(rcfg, lib) or soundlib.load(lib)))
+        out = pipeline.map_cues([{"t": 2.0, "sfx": sid, "nudge": 0.1}], lambda t: t, 10.0, lib, None, rcfg, repeat=True)
+        self.assertEqual(out[0].get("nudge"), 0.1)

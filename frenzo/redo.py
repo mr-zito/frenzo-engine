@@ -139,7 +139,8 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
         lib = soundlib.find_library(rcfg)
         if lib is not None:
             to_new = viral.mapper([(float(a), float(b)) for a, b in segs] if segs else [(0.0, dur)])
-            allowed = set(soundlib.guide(rcfg, lib))       # sounds you removed from your list are dropped
+            keep_all = rcfg.get("manual_keep_sounds", True)  # your render: every sound stays as it was
+            allowed = set() if keep_all else set(soundlib.guide(rcfg, lib))   # else sounds off your list are dropped
             for cu in cues_in_raw(meta):
                 if allowed and cu.get("sfx") not in allowed:
                     continue
@@ -148,7 +149,8 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
                     lib_cues.append({k: v for k, v in dict(cu, t=round(t, 3)).items() if k != "raw_t"})
     if lib is not None:
         pass
-    elif rcfg.get("sound_effects", True) and str(meta.get("category", "")).lower() in ("sus", "spicy"):
+    elif (rcfg.get("sound_effects", True) and str(meta.get("category", "")).lower() in ("sus", "spicy")
+          and (meta.get("sound_effects") or not rcfg.get("manual_keep_sounds", True))):   # no sus sound it never had
         at = next((e.get("at") for e in meta.get("sound_effects") or [] if "at" in e), dur * 0.4) + shift
         path = pick("sus")
         if path and 0 <= float(at) < dur:
@@ -225,7 +227,8 @@ def _restyle(pipe, transcriber, cfg, rcfg, dirpath, meta, login, span=None, over
         os.remove(title_png)
     if mixed:
         from .pipeline import sound_check
-        meta["sound"] = sound_check(dirpath, files_out, lib_cues, rows, lib, game_wav, dur, rcfg, login)
+        meta["sound"] = sound_check(dirpath, files_out, lib_cues, rows, lib, game_wav, dur, rcfg, login,
+                                    fix=not rcfg.get("manual_keep_sounds", True))
         meta["needs_review"] = bool(meta["sound"].get("needs_review")) or None
     elif meta.get("sound"):
         meta["sound"] = dict(meta["sound"], cues=[], qa=None)  # every cue was cut out (or removed from your list)

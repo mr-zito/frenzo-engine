@@ -153,6 +153,7 @@ DEFAULTS = {
         "five_titles": True,
         "risky_warning": True,          # red "risky for TikTok/Instagram" badge on sexual-content clips (warning only)
         "reedit_obey_note": True,      # re-edit with your note: no automatic trims / sounds / cap / title swap after it
+        "manual_keep_sounds": True,    # your renders (framing, longer cut, title): sounds stay exactly as they were
         "reedit_keep_sounds": True,    # re-edit note not about sound (e.g. "recenter"): the clip keeps its sounds
         "game_avoid_cam": True,        # the gameplay band never shows the stream's own webcam box
         "title_fix_doubles": True,     # 'tries to to rob' -> 'tries to rob' in the on-screen title
