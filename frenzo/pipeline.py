@@ -540,7 +540,8 @@ class Pipeline:
                 ass = viral.build_ass_bold(words_out, callouts, out_dur, rcfg, layout, editor.REEL_CAM_H,
                                            punch_words=d.get("punch_words") if isinstance(d.get("punch_words"), list) else None,
                                            hook_text=d.get("hook_text") if hook_on else None,
-                                           hook_end=max(hook_len, 1.5) if hook_on else 0.0)
+                                           hook_end=max(hook_len, 1.5) if hook_on else 0.0,
+                                           title=d.get("title_bar"))
             else:
                 ass = viral.build_ass(words_out, callouts, out_dur, rcfg, layout, editor.REEL_CAM_H)
         else:

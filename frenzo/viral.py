@@ -175,7 +175,24 @@ def _fit_size(text, base, width=820):
     return int(max(60, min(base, width / (0.66 * max(1, len(text))))))
 
 
-def build_ass_bold(words, callouts, dur, rcfg, layout, seam_y, punch_words=None, hook_text=None, hook_end=0.0):
+def _two_lines(txt):
+    """Split text into 2 lines of about the same length."""
+    ws = txt.split()
+    if len(ws) < 2:
+        return [txt]
+    best = min(range(1, len(ws)), key=lambda i: abs(len(" ".join(ws[:i])) - len(" ".join(ws[i:]))))
+    return [" ".join(ws[:best]), " ".join(ws[best:])]
+
+
+def _same_as_title(a, b):
+    """The hook text only repeats the title (most of its words are in it): don't show it twice."""
+    wa = {w for w in re.findall(r"[a-z0-9']+", (a or "").lower()) if len(w) > 2}
+    wb = {w for w in re.findall(r"[a-z0-9']+", (b or "").lower()) if len(w) > 2}
+    return bool(wa) and len(wa & wb) / len(wa) >= 0.6
+
+
+def build_ass_bold(words, callouts, dur, rcfg, layout, seam_y, punch_words=None, hook_text=None, hook_end=0.0,
+                   title=None):
     """1-3 words at a time, ALL CAPS, ~100 px, thick black outline + shadow, on the line between webcam and gameplay
     (under the title), clear of the TikTok / Reels / Shorts buttons (right side) and the bottom 20%.
     The spoken word pops to 115% (karaoke timing); 1-2 punch words in the highlight colour, a bit bigger.
@@ -204,13 +221,14 @@ def build_ass_bold(words, callouts, dur, rcfg, layout, seam_y, punch_words=None,
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     busy = []
-    if hook_text and hook_end > 0.3:
+    if hook_text and hook_end > 0.3 and not _same_as_title(hook_text, title):
         t1 = min(dur, hook_end)
         txt = _esc(censor(hook_text)).upper()
-        size = _fit_size(txt, base + 10, 900) if len(txt) <= 26 else _fit_size(txt[: len(txt) // 2 + 4], base + 10, 900)
+        lines = _two_lines(txt) if len(txt) > 16 else [txt]       # balanced lines, never one lonely word
+        size = _fit_size(max(lines, key=len), base + 10, 880)
         out.append(f"Dialogue: 3,{fmt_ts(0)},{fmt_ts(t1)},Hook,,0,0,0,,"
                    + r"{\pos(" + f"{cx},{cap_y}" + r")\fs" + str(size) + r"\fscx90\fscy90\t(0,120,\fscx104\fscy104)"
-                   + r"\t(120,200,\fscx100\fscy100)}" + txt.replace(" ", r"\N", 1 if len(txt) > 18 else 0))
+                   + r"\t(120,200,\fscx100\fscy100)}" + r"\N".join(lines))
         busy.append((0.0, t1))
     for c in callouts:
         t0, t1 = c["at"], min(dur, c["at"] + c.get("dur", 1.6))
