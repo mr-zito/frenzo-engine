@@ -96,8 +96,9 @@ TOOL = {
             "caption": {"type": "string", "description": "post caption, 1-2 sentences, credits the streamer"},
             "hashtags": {"type": "array", "items": {"type": "string"}},
             "spoiler": {"type": "boolean", "description": "true if it reveals major story events"},
-            "nudity": {"type": "boolean", "description": "true if any frame shows exposed nudity (bare breasts, "
-                       "genitals); suggestive dancing, bikinis and lingerie are NOT nudity"},
+            "nudity": {"type": "boolean", "description": "true ONLY if a frame clearly shows a woman's bare breasts / "
+                       "nipples, or genitals. A shirtless man (bare chest, abs), bikinis, lingerie, thongs, tight "
+                       "clothes and suggestive dancing are NOT nudity"},
             "nudity_at": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
                           "description": "only if nudity=true: [[start, end], ...] window seconds where exposed nudity "
                                          "is visible (generous: include a second before and after); [] otherwise"},
@@ -209,8 +210,8 @@ something weird. Several signals together usually mean a strong moment, but alwa
 - "flagged at" second = when the signal happened; chat reacts 1-5 s AFTER what it sees, so the cause is \
 usually just before it. If chat reacts almost instantly to a scene, the clip must start at the start of \
 that scene, not seconds after.
-- Flag nudity=true if any frame shows exposed nudity (bare breasts, genitals). Suggestive dancing, \
-bikinis and lingerie are not nudity. When nudity=true, also give nudity_at: the window seconds where it is visible \
+- Flag nudity=true ONLY if a frame clearly shows a woman's bare breasts / nipples, or genitals. A shirtless \
+man (bare chest, abs, a male stripper), bikinis, lingerie, thongs and suggestive dancing are NOT nudity. When nudity=true, also give nudity_at: the window seconds where it is visible \
 (be generous); the clip is kept and those parts are pixelated, so judge and score the moment as usual.
 - Flag spoiler=true for major story reveals (deaths of main characters, endings, plot twists)."""
 

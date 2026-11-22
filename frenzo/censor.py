@@ -48,7 +48,7 @@ def _get_detector():
     return _detector["d"]
 
 
-def detect(video, fps=4, threshold=0.25):
+def detect(video, fps=4, threshold=0.45):   # 0.25 mistook a shirtless man's chest for a breast
     """[(second, [(x, y, w, h), ...]), ...] for every sampled frame of the video with exposed nudity."""
     det = _get_detector()
     if det is None:
