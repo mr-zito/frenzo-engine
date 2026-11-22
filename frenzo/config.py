@@ -151,7 +151,8 @@ DEFAULTS = {
         "hook": True,                   # hook rules for the first 3 seconds
         "caption_style": "bold",        # bold (1-3 words ALL CAPS on the seam, karaoke pop) / mini (old)
         "five_titles": True,
-        "reedit_obey_note": True,       # re-edit with your note: no automatic trims / sounds / cap / title swap after it
+        "risky_warning": True,          # red "risky for TikTok/Instagram" badge on sexual-content clips (warning only)
+        "reedit_obey_note": True,      # re-edit with your note: no automatic trims / sounds / cap / title swap after it
     },
     "storage": {
         "output_dir": "clips",

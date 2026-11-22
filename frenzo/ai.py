@@ -105,12 +105,17 @@ TOOL = {
             "nudity_at": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
                           "description": "only if nudity=true: [[start, end], ...] window seconds where exposed nudity "
                                          "is visible (generous: include a second before and after); [] otherwise"},
+            "risky": {"type": "boolean", "description": "true if TikTok / Instagram are likely to remove or restrict "
+                      "this clip for SEXUAL CONTENT even without nudity: strip club or lap dance, twerking / grinding "
+                      "close-ups, thongs or bare buttocks in focus, sex scenes or simulated sex acts, explicit sexual "
+                      "lines on screen. Game footage counts too. Normal swimwear, a kiss or mild flirting: false"},
+            "risky_why": {"type": "string", "description": "only if risky: a few words on what platforms would flag"},
             "reason": {"type": "string", "description": "one sentence: why this score"},
         },
         "required": ["what_happens", "keep", "viral_score", "category", "start", "end", "title_bar", "highlight", "emoji",
                      "segments", "callouts", "cues", "hook_type", "hook_in", "hook_out", "hook_text", "titles",
                      "title_pick", "punch_words", "title",
-                     "caption", "hashtags", "spoiler", "nudity", "reason"],
+                     "caption", "hashtags", "spoiler", "nudity", "risky", "reason"],
     },
 }
 

@@ -442,6 +442,7 @@ function renderClips() {
       <div class="th">${c.has_thumb ? `<img src="/media/${c.id}/thumb.jpg?v=${c.version}" loading="lazy">` : ""}
         ${c.category === "manual" ? `<span class="sc cut" title="Cut by you">✂</span>` : c.score != null ? `<span class="sc">${c.score}</span>` : ""}
         <span class="du">${Math.round(c.duration || 0)}s</span>
+        ${c.risky ? `<span class="rk" title="Risky for TikTok/Instagram: ${esc(c.risky)}">⚠ Risky</span>` : ""}
         ${posted ? `<span class="po">${posted}</span>` : ""}
         ${busy[c.id] ? `<div class="busy"><span class="spinner"></span>${busy[c.id] === "queued" ? "Waiting to re-edit…" : "Re-editing…"}</div>` : ""}
       </div>
@@ -510,6 +511,7 @@ function renderDetail(reloaded) {
     c.old_title ? `<span class="badge" title="Title before the re-edit">was: ${esc(c.old_title)}</span>` : "",
     c.censored ? `<span class="badge r" title="Nudity was pixelated in ${c.censored.spots} spot(s)">Blurred</span>`
       : c.nudity ? `<span class="badge r" title="Claude saw nudity in this clip and it was NOT blurred">Nudity</span>` : "",
+    c.risky ? `<span class="badge r" title="TikTok / Instagram may remove it for sexual content: ${esc(c.risky)}">⚠ Risky for TikTok/Instagram</span>` : "",
   ].join("");
   // versions
   const cur = S.curVersion && c.videos.includes(S.curVersion) ? S.curVersion : c.main;
@@ -631,7 +633,9 @@ function renderPost() {
   $$("#postFields [data-max]").forEach((el) => { el.addEventListener("input", () => { counters(); savePostTexts(); }); });
   counters();
   $("#postTip").textContent = (c.censored ? "This clip had nudity, now pixelated: watch it once before posting, reach may be limited and some campaigns reject it. "
-    : c.nudity ? "Claude saw nudity in this clip and it is NOT blurred: platforms may remove it. " : "") + P.tip;
+    : c.nudity ? "Claude saw nudity in this clip and it is NOT blurred: platforms may remove it. " : "")
+    + (c.risky ? `Risky: TikTok and Instagram may remove this for sexual content (${c.risky}), and removals count against your account. ` : "")
+    + P.tip;
   const noMark = camp && camp.watermark === false;
   const file = (noMark ? (c.videos || []).find((f) => f === "clip_clean.mp4") : null)
     || (c.videos || []).find((f) => f.slice(5, -4).split("+").includes(P.k)) || (c.videos || []).find((f) => f === "clip_clean.mp4") || c.main;

@@ -569,6 +569,7 @@ class ClipIndex:
             "old_title": meta.get("old_title"), "stream_title": meta.get("stream_title") or "",
             "campaign": meta.get("campaign") or "", "campaign_match": meta.get("campaign_match"),
             "nudity": bool(meta.get("nudity")), "censored": meta.get("censored"),
+            "risky": (meta.get("risky") or {}).get("why") if isinstance(meta.get("risky"), dict) else None,
             "campaign_note": meta.get("campaign_note") or "",
             "user_context": meta.get("user_context") or "",
             "recording": os.path.splitext(str(meta.get("recording") or ""))[0],

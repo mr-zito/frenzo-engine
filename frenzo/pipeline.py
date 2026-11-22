@@ -663,6 +663,9 @@ class Pipeline:
             "user_context": c.user_context or None, "cut_by_hand": c.manual or None,
             "viral_score": score, "reason": d.get("reason"),
             "spoiler": d.get("spoiler"), "nudity": bool(d.get("nudity")) or None, "censored": censored,
+            # warning only: platforms may remove it for sexual content (strip club, lap dance, twerking...)
+            "risky": {"why": str(d.get("risky_why") or "sexual content")[:160]}
+            if d.get("risky") and rcfg.get("risky_warning", True) else None,
             "censor_regions": [list(r) for r in censor_regs] if censor_regs else None,
             "nudity_raw": _nudity_raw(d, win_start, clip_abs, raw_offset, redo),
             "flagged_by": c.source, "language": lang,
