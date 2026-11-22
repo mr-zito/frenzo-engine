@@ -358,7 +358,8 @@ class Pipeline:
             segs = [[start, end]]
         # ---- hook rules (first 3 s) and pacing: Claude chooses, code enforces ----
         hook_on = bool(rcfg.get("hook", True)) and not c.forced and layout in ("reel", "focus")
-        ht, hp = hook_mod.hook_piece(d, win_dur) if hook_on else (None, None)
+        ht, hp = hook_mod.hook_piece(d, win_dur, tuple(rcfg.get("hook_types") or hook_mod.DEFAULT_TYPES)) \
+            if hook_on else (None, None)
         lead, tail = float(clip_value(self.cfg, "lead_in", 1.5)), float(clip_value(self.cfg, "tail", 2.0))
         if hook_on:                        # open on the action, end 1-2 s after the reaction (clean loop)
             lead, tail = min(lead, 0.5), max(1.0, min(tail, 2.0))
@@ -375,9 +376,12 @@ class Pipeline:
                     hook_notes.append(f"cut {cut:.1f}s of dead air")
             if ht not in ("cold_open", "reaction_first"):
                 a0 = segs[0][0]
+                # "action" hook: open right on the strongest second Claude picked (hook_in), within 6 s
+                if ht == "action" and hp and segs[0][0] < hp[0] < min(segs[0][1] - 3, segs[0][0] + 6):
+                    segs[0][0] = hp[0]
                 segs = hook_mod.trim_leading_quiet(segs, loud, protect=rel)
                 if segs[0][0] > a0:
-                    hook_notes.append(f"trimmed {segs[0][0] - a0:.0f}s of quiet at the start")
+                    hook_notes.append(f"opens {segs[0][0] - a0:.1f}s later, on the action")
         if camp and (camp.get("min_seconds") or camp.get("max_seconds")):
             if c.manual and c.forced:              # your own cut "as is": kept exactly as you chose it
                 total = sum(b2 - a2 for a2, b2 in segs)
@@ -434,8 +438,8 @@ class Pipeline:
                 log("sound library not found (render.sound_library_path): using the old sus sound", c.login)
         if lib is not None:
             rc_cap = rcfg
-            if hook_on and hook_len and rcfg.get("sound_max_per_clip"):   # the rewind on the cut back counts too
-                rc_cap = dict(rcfg, sound_max_per_clip=max(1, int(rcfg["sound_max_per_clip"]) - 1))
+            if hook_on and rcfg.get("sound_max_per_clip"):   # one of the sounds is kept for the hook
+                rc_cap = dict(rcfg, sound_max_per_clip=max(1, int(rcfg["sound_max_per_clip"]) - (2 if hook_len else 1)))
             cues_out = map_cues(d.get("cues"), to_out, out_dur, lib, camp, rc_cap)
             from . import soundlib as _sl
             _g = _sl.guide(rcfg, lib)
@@ -446,9 +450,11 @@ class Pipeline:
                 from . import soundlib
                 safe = rcfg.get("sound_safe_mode", True)
 
+                _only = set(soundlib.guide(rcfg, lib)) or None      # sounds added by code: your list too
+
                 def fid(s, lb):
                     return soundlib.fix_id(s, lb, not safe or bool((camp or {}).get("allow_music")),
-                                           not safe or bool((camp or {}).get("allow_explicit")))
+                                           not safe or bool((camp or {}).get("allow_explicit")), only=_only)
                 pref = fid(d.get("hook_sfx"), lib) if d.get("hook_sfx") else None
                 if ht == "tension" and hp:          # the riser / suspense sound ends on the hit
                     t_hit = to_out(hp[1])
@@ -466,9 +472,8 @@ class Pipeline:
                                      "gain_db": -3.0, "stop": 0.0, "duck": False, "kind": "transition", "max_len": 1.5,
                                      "fx": [], "auto": True})
                 cap = int(rcfg.get("sound_max_per_clip", 0) or 0) if soundlib.guide(rcfg, lib) else 0
-                if not cap or len(cues_out) < cap:
-                    cues_out, notes = hook_mod.ensure_opening_sound(cues_out, ht, hook_len, lib, fid, cap=cap)
-                    hook_notes += notes
+                cues_out, notes = hook_mod.ensure_opening_sound(cues_out, ht, hook_len, lib, fid, cap=0, prefer=pref)
+                hook_notes += notes
                 for cu in cues_out:                 # sounds added by code get their effect from your list too
                     g = soundlib.guide(rcfg, lib).get(cu["sfx"]) if cu.get("auto") else None
                     if g:

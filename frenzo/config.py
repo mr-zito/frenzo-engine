@@ -119,6 +119,7 @@ DEFAULTS = {
         "sound_safe_mode": True,        # no sounds tagged music / explicit unless the campaign allows them
         "sound_no_repeat": 3,           # prefer not to reuse sounds from the account's last N clips
         "sound_max_per_clip": 3,        # hard cap: never more sound effects than this in one clip
+        "hook_types": ["action", "tension", "quote"],   # + reaction_first / cold_open = the rewind styles
         # YOUR sound list: the only sounds Frenzo uses, when to use each one, and the picture effect that goes
         # with it (effect: zoom / flash / slow_zoom / cam_zoom / freeze_zoom / silence_after / hook_rewind).
         # rare: true = only for a moment that really calls for it. Empty list = the whole library (old way).
@@ -128,8 +129,6 @@ DEFAULTS = {
             {"id": "hells-kitchen-suspense", "when": "build suspense before something weird is about to happen",
              "effect": "slow_zoom"},
             {"id": "bua-wa-wa-wa-wa", "when": "a sexy lady / a sexy moment", "rare": True},
-            {"id": "tape-rewind", "when": "the hook: show the streamer's reaction (webcam only, no spoiler) first, "
-                                          "then rewind to what happened", "effect": "hook_rewind"},
             {"id": "fnaf-2-hallway", "when": "suspense before a little scary moment", "effect": "slow_zoom"},
             {"id": "bass-drop-vine-boom", "when": "right AFTER the impact, to make it funny (the character dies in a "
                                                   "weird way, a weird NPC), the streamer looking at the camera in "

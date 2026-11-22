@@ -8,10 +8,11 @@
 - pacing: no quiet, wordless stretch longer than ~1.5 s inside a piece (cut out), one short 0.5x slow-mo allowed."""
 import statistics
 
-TYPES = ("cold_open", "reaction_first", "tension", "quote")
+TYPES = ("action", "tension", "quote", "cold_open", "reaction_first")
+DEFAULT_TYPES = ("action", "tension", "quote")      # render.hook_types (the rewind styles are off by default)
 DEFAULT_SFX = {"cold_open": ["record-scratch", "tape-rewind"], "reaction_first": ["record-scratch", "whoosh-fast"],
                "tension": ["riser-air"], "quote": ["vine-boom-slowed", "whoosh-fast"]}
-OPEN_SFX = ["whoosh-fast", "vine-boom-slowed", "deep-boom", "whoosh"]
+OPEN_SFX = ["whoosh-fast", "boom", "vine-boom-slowed", "deep-boom", "whoosh"]
 
 
 def mapper(segments, speeds=None, offset=0.0):
@@ -29,9 +30,12 @@ def mapper(segments, speeds=None, offset=0.0):
     return f
 
 
-def hook_piece(d, win_dur):
-    """(type, (in, out) window seconds or None) from Claude's answer, lengths clamped by type."""
+def hook_piece(d, win_dur, allowed=DEFAULT_TYPES):
+    """(type, (in, out) window seconds or None) from Claude's answer, lengths clamped by type. A type you turned
+    off (render.hook_types) becomes "action": the clip simply opens on its strongest second."""
     ht = d.get("hook_type") if d.get("hook_type") in TYPES else None
+    if ht is None or ht not in allowed:
+        ht = "action"
     try:
         a, b = float(d.get("hook_in")), float(d.get("hook_out"))
     except (TypeError, ValueError):
@@ -118,8 +122,9 @@ def apply_slowmo(segs, slow, max_len=2.0):
     return out, sp
 
 
-def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None, cap=0):
-    """A sound must land in the first 1.0 s; a cold open / reaction-first gets its rewind or scratch on the cut back.
+def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None, cap=0, prefer=None):
+    """The audio hook: a sound lands in the first second (with a punch-in on the picture: the visual hook).
+    prefer: Claude's hook_sfx. A cold open / reaction-first (if you turned them on) gets its sound on the cut back.
     Returns (cues, notes)."""
     notes = []
     cues = list(cues)
@@ -132,12 +137,17 @@ def ensure_opening_sound(cues, hook_type, hook_len, lib, fix_id, kind_of=None, c
                 notes.append(f"added {sid} on the cut back at {hook_len:.2f}s")
     if cap and len(cues) >= cap:                     # your cap wins over the "sound in the first second" rule
         return sorted(cues, key=lambda c: c["t"]), notes
-    if not any(c["t"] < 1.0 for c in cues):
-        sid = next((fix_id(s, lib) for s in OPEN_SFX if fix_id(s, lib)), None)
+    first = [c for c in cues if c["t"] < 1.0]
+    if first:                                        # Claude's own opening sound: make it hit the picture too
+        for c in first:
+            if "zoom" not in (c.get("fx") or []) and not set(c.get("fx") or []) & {"slow_zoom", "zoom_hold"}:
+                c["fx"] = list(c.get("fx") or []) + ["zoom"]
+    else:
+        sid = next((fix_id(s, lib) for s in ([prefer] if prefer else []) + OPEN_SFX if s and fix_id(s, lib)), None)
         if sid:
-            # whooshes and booms land by their peak (the sound kit's rule); 0.5 s leaves room for the lead-in
-            cues.append({"t": 0.5, "sfx": sid, "role": "support", "align": "peak", "gain_db": -4.0, "stop": 0.0,
-                         "duck": False, "kind": "whoosh" if "whoosh" in sid else "hit", "max_len": 1.5, "fx": [],
+            # whooshes and booms land by their peak (the sound kit's rule); 0.35 s leaves room for the first frames
+            cues.append({"t": 0.35, "sfx": sid, "role": "support", "align": "peak", "gain_db": -3.0, "stop": 0.0,
+                         "duck": False, "kind": "whoosh" if "whoosh" in sid else "hit", "max_len": 1.5, "fx": ["zoom"],
                          "auto": True})
-            notes.append(f"added {sid} at 0.5s (a sound must land in the first second)")
+            notes.append(f"hook: {sid} + punch-in at 0.35s")
     return sorted(cues, key=lambda c: c["t"]), notes

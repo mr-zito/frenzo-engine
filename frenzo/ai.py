@@ -50,7 +50,7 @@ TOOL = {
                              "required": ["text", "at", "color"]}},
             "hook_text": {"type": "string", "description": "on-screen hook text during the first ~1.5 s: max 6 words, "
                           "teases without spoiling"},
-            "hook_type": {"type": "string", "enum": ["cold_open", "reaction_first", "tension", "quote"],
+            "hook_type": {"type": "string", "enum": ["action", "tension", "quote"],
                           "description": "how the first 3 s grab the viewer (see HOOK)"},
             "hook_in": {"type": "number", "description": "window seconds: start of the hook piece (cold_open: the "
                         "payoff; reaction_first: the peak reaction; tension: one beat before it goes wrong; quote: "
@@ -58,8 +58,8 @@ TOOL = {
             "hook_out": {"type": "number", "description": "window seconds: end of the hook piece (cold_open 1-1.5 s "
                          "after hook_in; tension: the hit)"},
             "hook_sfx": {"type": "string", "description": "sound id for the hook, from the allowed sounds "
-                         "(reaction_first / cold_open: tape-rewind on the cut back; tension: a suspense sound "
-                         "ending on the hit); empty if none"},
+                         "that opens the clip in its first second (the audio hook: an impact, a whoosh, a suspense "
+                         "sting that fits the moment); empty to let code pick"},
             "titles": {"type": "array", "description": "5 title candidates in DIFFERENT formats (see TITLES)",
                        "items": {"type": "object", "properties": {"text": {"type": "string"},
                                                                   "format": {"type": "string"}},
@@ -215,12 +215,13 @@ bikinis and lingerie are not nudity. When nudity=true, also give nudity_at: the 
 - Flag spoiler=true for major story reveals (deaths of main characters, endings, plot twists)."""
 
 HOOK_RULES = """HOOK (first 3 seconds; the viewer decides in 1 second):
-- hook_type reaction_first (best when the streamer reacts big): the streamer's peak reaction is shown first \
-(hook_in/hook_out, 1-2.5 s; code shows ONLY the webcam then, so nothing is spoiled), then the clip rewinds \
-(tape-rewind) to what caused it. cold_open: the same idea with the payoff (also shown webcam-only). tension: start \
-one beat before it goes wrong; a suspense sound lands on the hit. quote: open on the streamer's confident line \
-right before the fail ("I got this"), then the hit.
-- Something moves and the hook text is on screen within the first 1.0 s (a sound there only if it fits).
+- The clip plays in order (no rewind, no replay of the ending first). It must grab in the first second, both \
+VISUALLY (the picture already moving: the car flying, the NPC turning around, the streamer's face mid-reaction) \
+and with SOUND (hook_sfx lands in the first second; code adds a punch-in zoom on it).
+- hook_type action: hook_in = the most striking second near the start; the clip opens right there (cut the \
+slow lead-up). tension: start one beat before it goes wrong; a suspense sound from the list lands on the hit \
+(hook_out = the hit). quote: open on the streamer's confident line right before the fail ("I got this"), then the hit.
+- The hook text is on screen from the first frame.
 - Never open on dead air, a menu, the map, a loading screen or calm talking.
 - End 1-2 s after the reaction so the clip loops cleanly (no long outro).
 - hook_text: max 6 words, on screen during the hook; it teases, never tells the ending.
@@ -295,10 +296,8 @@ exactly on the contact frame (the hit, the death, the crash). bass-drop-vine-boo
 (the game then goes silent while the streamer stares at the camera).
 - align: "peak" for impacts and whooshes (boom, vine-boom-slowed, taco-bell-bong, flashbang-loud, cash-register, \
 whoosh-fast), "start" for voices and stings (faahhhh, rizzz, bua-wa-wa-wa-wa, awkward-pause, anime-wow, \
-apple-notification, tape-rewind, bass-drop-vine-boom), "end" for suspense builds so they land on the moment \
+apple-notification, bass-drop-vine-boom), "end" for suspense builds so they land on the moment \
 (hells-kitchen-suspense, fnaf-2-hallway, sudden-suspense: t = the moment the weird/scary thing happens).
-- tape-rewind belongs to the hook: use hook_type reaction_first (the streamer's reaction is shown first, webcam only, \
-no spoiler) and code puts tape-rewind on the cut back to the start.
 - gain_db: 0 for the main hit, -3 to -6 for a supporting sound. stop (0.15-0.4) only before one big impact. The \
 picture effect of each sound (pause+zoom, webcam zoom, slow zoom, flash) is added by code: fx can stay [].
 YOUR SOUNDS (id (length): when to use it -> what the picture does):"""

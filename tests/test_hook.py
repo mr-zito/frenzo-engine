@@ -46,10 +46,12 @@ class Titles(unittest.TestCase):
 class Hook(unittest.TestCase):
     def test_hook_piece_lengths(self):
         self.assertEqual(hook.hook_piece({"hook_type": "cold_open", "hook_in": 30, "hook_out": 35}, 90),
-                         ("cold_open", (30.0, 31.5)))
-        self.assertEqual(hook.hook_piece({"hook_type": "reaction_first", "hook_in": 40, "hook_out": 41.5}, 90)[1],
+                         ("action", (30.0, 35.0)))                     # rewind styles are off by default
+        self.assertEqual(hook.hook_piece({"hook_type": "cold_open", "hook_in": 30, "hook_out": 35}, 90,
+                                         allowed=hook.TYPES), ("cold_open", (30.0, 31.5)))
+        self.assertEqual(hook.hook_piece({"hook_type": "reaction_first", "hook_in": 40, "hook_out": 41.5}, 90, allowed=hook.TYPES)[1],
                          (40.0, 41.5))
-        self.assertEqual(hook.hook_piece({"hook_type": "nonsense", "hook_in": "x"}, 90), (None, None))
+        self.assertEqual(hook.hook_piece({"hook_type": "nonsense", "hook_in": "x"}, 90), ("action", None))
 
     def test_mapper_with_hook_offset_and_slowmo(self):
         segs, speeds = hook.apply_slowmo([[10, 20], [25, 30]], [15, 16])
@@ -86,11 +88,15 @@ class Hook(unittest.TestCase):
         def fix(s, lib):
             return s if s in lib_ids else None
         cues, notes = hook.ensure_opening_sound([{"t": 5.0, "sfx": "x"}], "cold_open", 1.4, None, fix)
-        self.assertEqual([c["t"] for c in cues], [0.5, 1.4, 5.0])
+        self.assertEqual([c["t"] for c in cues], [0.35, 1.4, 5.0])
+        self.assertEqual(cues[0]["fx"], ["zoom"])                        # the audio hook punches the picture too
         self.assertEqual(cues[1]["sfx"], "record-scratch")
         self.assertEqual(len(notes), 2)
         cues, notes = hook.ensure_opening_sound([{"t": 0.3, "sfx": "x"}], "quote", 0, None, fix)
         self.assertEqual(len(cues), 1)
+        self.assertEqual(cues[0]["fx"], ["zoom"])                        # Claude's own opening sound gets the punch
+        cues, _ = hook.ensure_opening_sound([], "action", 0, None, fix, prefer="tape-rewind")
+        self.assertEqual(cues[0]["sfx"], "tape-rewind")
 
 
 class Captions(unittest.TestCase):
