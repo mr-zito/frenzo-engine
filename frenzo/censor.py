@@ -102,6 +102,10 @@ def regions(dets, claude_ranges, duration, layout, hold=0.5, max_regions=40):
         a, b = max(0.0, a - 0.5), min(duration, b + 0.5)
         if b - a < 0.2:
             continue
+        if detector_spots and b - a > 6.0:
+            # the detector found the real spots: a long "the whole scene" range from Claude would pixelate the
+            # entire gameplay for the whole clip (a 44 s strip-club clip came out all pixels). Trust the spots.
+            continue
         covered = sum(max(0.0, min(b, s[1]) - max(a, s[0])) for s in spots)
         if covered < 0.6 * (b - a):
             spots.append([a, b, gx, gy, gx + gw, gy + gh])

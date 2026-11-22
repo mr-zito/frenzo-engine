@@ -58,5 +58,18 @@ class Censor(unittest.TestCase):
         self.assertEqual(len(C.regions([(i * 0.1, [(i * 30, 0, 20, 20)]) for i in range(300)], [], 40, "focus")[0]) <= 40, True)
 
 
+
+class LongClaudeRange(unittest.TestCase):
+    def test_detector_spots_win_over_a_whole_scene_range(self):
+        from frenzo import censor
+        dets = [(5.0, [(450, 800, 150, 150)]), (12.0, [(500, 1100, 140, 140)])]
+        regs, n_det, n_fb = censor.regions(dets, [(0.0, 44.0)], 44.0, "reel")
+        self.assertEqual(n_fb, 0)                        # no full-gameplay blur for the whole clip
+        self.assertTrue(all(r[1] - r[0] < 5 for r in regs))
+        regs, n_det, n_fb = censor.regions(dets, [(20.0, 23.0)], 44.0, "reel")
+        self.assertEqual(n_fb, 1)                        # a short moment the detector missed: still covered
+        regs, n_det, n_fb = censor.regions([], [(0.0, 44.0)], 44.0, "reel")
+        self.assertEqual(n_fb, 1)                        # detector found nothing: the safety net stays
+
 if __name__ == "__main__":
     unittest.main()
