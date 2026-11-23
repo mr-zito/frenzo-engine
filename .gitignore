@@ -13,3 +13,7 @@ config.before-*.yaml
 *.patch
 app_window.log
 assets/sfx/_builtin/
+
+# your own settings (copy config.example.yaml)
+config.yaml
+sound_library.html
